@@ -1,193 +1,197 @@
-// Package middleware provides HTTP middleware components for the Gin framework.
 package middleware
 
 import (
-	"fmt"
-	"strconv"
+	"context"
+	"math"
+	"net/netip"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
 
 	"github.com/andrewhigh08/iam-service/internal/adapter/http/response"
-	"github.com/andrewhigh08/iam-service/internal/port"
 )
 
-// RateLimitConfig holds rate limiter configuration.
+const (
+	janitorInterval = time.Minute
+	idleTTL         = 3 * time.Minute
+	loginKeyPrefix  = "login:"
+	// maxEntries bounds the number of client buckets kept in memory.
+	maxEntries = 100_000
+	// ipv6ClientBits is the prefix length that identifies one IPv6 client: a subscriber
+	// typically controls at least a /64, so single addresses would be free to rotate.
+	ipv6ClientBits = 64
+	// maxRetryAfterSeconds caps the Retry-After header; a limiter that never refills (a zero
+	// rate) would otherwise report an infinite wait.
+	maxRetryAfterSeconds = 3600
+)
+
+// RateLimitConfig sets the per-IP limits. RPS and Burst apply to every request, LoginPerMinute
+// and LoginBurst to the login-like endpoints. A zero rate denies requests once the burst is spent.
 type RateLimitConfig struct {
-	// RequestsPerSecond is the global rate limit per IP.
-	RequestsPerSecond float64
-
-	// Burst is the maximum number of requests allowed in a burst.
-	Burst int
-
-	// LoginAttemptsPerMinute is the login rate limit per IP.
-	LoginAttemptsPerMinute int
-
-	// LoginBurst is the maximum login attempts allowed in a burst.
-	LoginBurst int
+	RPS            float64
+	Burst          int
+	LoginPerMinute int
+	LoginBurst     int
 }
 
-// DefaultRateLimitConfig returns default rate limit configuration.
-func DefaultRateLimitConfig() RateLimitConfig {
-	return RateLimitConfig{
-		RequestsPerSecond:      100, // 100 requests per second
-		Burst:                  200, // Allow burst of 200
-		LoginAttemptsPerMinute: 5,   // 5 login attempts per minute
-		LoginBurst:             10,  // Allow burst of 10
-	}
+// entry is the limiter of one key and when it was last used.
+type entry struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
 }
 
-// IPRateLimiter is an in-memory rate limiter per IP address.
-//
-// Suitable for single-instance deployments. For distributed systems,
-// use RedisRateLimiter instead.
+// IPRateLimiter keeps an in-memory token bucket per client. Clients are keyed by IPv4 address
+// or IPv6 /64 prefix. Entries idle for more than three minutes are evicted by the janitor
+// started with Start, and the table never grows beyond maxEntries: at the cap an arbitrary
+// entry makes room for a new client.
 type IPRateLimiter struct {
-	limiters map[string]*rate.Limiter // IP -> Limiter mapping
-	config   RateLimitConfig          // Configuration
+	cfg             RateLimitConfig
+	janitorInterval time.Duration
+	idleTTL         time.Duration
+	maxEntries      int
+	mu              sync.Mutex
+	entries         map[string]*entry
 }
 
-// NewIPRateLimiter creates a new in-memory IP rate limiter.
-func NewIPRateLimiter(config RateLimitConfig) *IPRateLimiter {
+// NewIPRateLimiter creates a limiter with cfg; call Start to run its janitor.
+func NewIPRateLimiter(cfg RateLimitConfig) *IPRateLimiter {
 	return &IPRateLimiter{
-		limiters: make(map[string]*rate.Limiter),
-		config:   config,
+		cfg:             cfg,
+		janitorInterval: janitorInterval,
+		idleTTL:         idleTTL,
+		maxEntries:      maxEntries,
+		entries:         make(map[string]*entry),
 	}
 }
 
-// GetLimiter returns the rate limiter for the given IP address.
-// Creates a new limiter if one doesn't exist.
-func (l *IPRateLimiter) GetLimiter(ip string) *rate.Limiter {
-	limiter, exists := l.limiters[ip]
-	if !exists {
-		limiter = rate.NewLimiter(rate.Limit(l.config.RequestsPerSecond), l.config.Burst)
-		l.limiters[ip] = limiter
-	}
-	return limiter
+// Start runs the janitor goroutine until ctx is done.
+func (l *IPRateLimiter) Start(ctx context.Context) {
+	go l.janitor(ctx)
 }
 
-// GetLoginLimiter returns the login rate limiter for the given IP address.
-func (l *IPRateLimiter) GetLoginLimiter(ip string) *rate.Limiter {
-	key := "login:" + ip
-	limiter, exists := l.limiters[key]
-	if !exists {
-		// Convert per minute to per second
-		rps := float64(l.config.LoginAttemptsPerMinute) / 60.0
-		limiter = rate.NewLimiter(rate.Limit(rps), l.config.LoginBurst)
-		l.limiters[key] = limiter
-	}
-	return limiter
-}
-
-// RateLimitMiddleware returns a Gin middleware for global rate limiting.
-func RateLimitMiddleware(limiter *IPRateLimiter) gin.HandlerFunc {
+// Middleware enforces the global per-client limit and answers 429 with Retry-After when exceeded.
+func (l *IPRateLimiter) Middleware() gin.HandlerFunc {
+	limit := rate.Limit(l.cfg.RPS)
 	return func(c *gin.Context) {
-		ip := c.ClientIP()
-		l := limiter.GetLimiter(ip)
-
-		if !l.Allow() {
-			c.Header("Retry-After", "1")
-			response.TooManyRequests(c, "rate limit exceeded", 1)
-			c.Abort()
-			return
-		}
-
-		c.Next()
+		l.limitRequest(c, clientKey(c.ClientIP()), limit, l.cfg.Burst, "rate limit exceeded")
 	}
 }
 
-// LoginRateLimitMiddleware returns a Gin middleware for login rate limiting.
-// More restrictive than global rate limiting to prevent brute-force attacks.
-func LoginRateLimitMiddleware(limiter *IPRateLimiter) gin.HandlerFunc {
+// LoginMiddleware enforces the stricter per-client login limit, tracked separately from the global one.
+func (l *IPRateLimiter) LoginMiddleware() gin.HandlerFunc {
+	limit := rate.Limit(float64(l.cfg.LoginPerMinute) / 60)
 	return func(c *gin.Context) {
-		ip := c.ClientIP()
-		l := limiter.GetLoginLimiter(ip)
-
-		if !l.Allow() {
-			c.Header("Retry-After", "60")
-			response.TooManyRequests(c, "too many login attempts, please try again later", 60)
-			c.Abort()
-			return
-		}
-
-		c.Next()
+		l.limitRequest(c, loginKeyPrefix+clientKey(c.ClientIP()), limit, l.cfg.LoginBurst, "too many login attempts, please try again later")
 	}
 }
 
-// RedisRateLimiter uses Redis for distributed rate limiting.
-//
-// Suitable for multi-instance deployments where rate limits must be
-// shared across all instances.
-type RedisRateLimiter struct {
-	cache  port.RateLimitCache // Redis cache interface
-	config RateLimitConfig     // Configuration
+// limitRequest lets the request through or aborts it with 429 and message.
+func (l *IPRateLimiter) limitRequest(c *gin.Context, key string, limit rate.Limit, burst int, message string) {
+	now := time.Now()
+	ok, wait := reserve(l.limiter(key, limit, burst, now), now)
+	if !ok {
+		response.TooManyRequests(c, message, retryAfterSeconds(wait))
+		c.Abort()
+		return
+	}
+	c.Next()
 }
 
-// NewRedisRateLimiter creates a new Redis-based rate limiter.
-func NewRedisRateLimiter(cache port.RateLimitCache, config RateLimitConfig) *RedisRateLimiter {
-	return &RedisRateLimiter{
-		cache:  cache,
-		config: config,
+// limiter returns the limiter stored under key, creating it when absent, and marks it as used at now.
+func (l *IPRateLimiter) limiter(key string, limit rate.Limit, burst int, now time.Time) *rate.Limiter {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	e, ok := l.entries[key]
+	if !ok {
+		if len(l.entries) >= l.maxEntries {
+			l.evictOne()
+		}
+		e = &entry{limiter: rate.NewLimiter(limit, burst)}
+		l.entries[key] = e
+	}
+	e.lastSeen = now
+	return e.limiter
+}
+
+// evictOne removes an arbitrary entry; the caller holds the lock. Map iteration order is
+// random, so under a flood of new clients the flood mostly evicts itself.
+func (l *IPRateLimiter) evictOne() {
+	for key := range l.entries {
+		delete(l.entries, key)
+		return
 	}
 }
 
-// RedisRateLimitMiddleware returns a Gin middleware for Redis-based global rate limiting.
-func RedisRateLimitMiddleware(limiter *RedisRateLimiter) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		ip := c.ClientIP()
-		key := fmt.Sprintf("global:%s", ip)
-		window := time.Second
-
-		count, err := limiter.cache.Increment(c.Request.Context(), key, window)
-		if err != nil {
-			// On error, allow the request but log it
-			c.Next()
+// janitor evicts idle entries every janitorInterval until ctx is done.
+func (l *IPRateLimiter) janitor(ctx context.Context) {
+	ticker := time.NewTicker(l.janitorInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
 			return
+		case now := <-ticker.C:
+			l.evictIdle(now)
 		}
-
-		if count > int64(limiter.config.Burst) {
-			c.Header("X-RateLimit-Limit", strconv.Itoa(limiter.config.Burst))
-			c.Header("X-RateLimit-Remaining", "0")
-			c.Header("Retry-After", "1")
-			response.TooManyRequests(c, "rate limit exceeded", 1)
-			c.Abort()
-			return
-		}
-
-		// Set rate limit headers
-		remaining := int64(limiter.config.Burst) - count
-		if remaining < 0 {
-			remaining = 0
-		}
-
-		c.Header("X-RateLimit-Limit", strconv.Itoa(limiter.config.Burst))
-		c.Header("X-RateLimit-Remaining", strconv.FormatInt(remaining, 10))
-
-		c.Next()
 	}
 }
 
-// RedisLoginRateLimitMiddleware returns a Gin middleware for Redis-based login rate limiting.
-func RedisLoginRateLimitMiddleware(limiter *RedisRateLimiter) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		ip := c.ClientIP()
-		key := fmt.Sprintf("login:%s", ip)
-		window := time.Minute
+// evictIdle removes entries unused for longer than idleTTL as of now and returns how many were removed.
+func (l *IPRateLimiter) evictIdle(now time.Time) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
-		count, err := limiter.cache.Increment(c.Request.Context(), key, window)
-		if err != nil {
-			// On error, allow the request but log it
-			c.Next()
-			return
+	removed := 0
+	for key, e := range l.entries {
+		if now.Sub(e.lastSeen) > l.idleTTL {
+			delete(l.entries, key)
+			removed++
 		}
-
-		if count > int64(limiter.config.LoginAttemptsPerMinute) {
-			c.Header("Retry-After", "60")
-			response.TooManyRequests(c, "too many login attempts, please try again later", 60)
-			c.Abort()
-			return
-		}
-
-		c.Next()
 	}
+	return removed
+}
+
+// clientKey normalizes a client IP into a bucket key: the address itself for IPv4 (including
+// IPv4-mapped IPv6), the /64 prefix for IPv6. A value that is not an IP is used as it is.
+func clientKey(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	addr = addr.Unmap().WithZone("")
+	if !addr.Is6() {
+		return addr.String()
+	}
+	prefix, err := addr.Prefix(ipv6ClientBits)
+	if err != nil {
+		return addr.String()
+	}
+	return prefix.String()
+}
+
+// reserve takes one token from lim when one is available at now. Otherwise it reports false
+// together with the time until a token becomes available, without consuming anything.
+func reserve(lim *rate.Limiter, now time.Time) (bool, time.Duration) {
+	r := lim.ReserveN(now, 1)
+	if !r.OK() {
+		return false, time.Second
+	}
+	delay := r.DelayFrom(now)
+	if delay <= 0 {
+		return true, 0
+	}
+	r.CancelAt(now)
+	return false, delay
+}
+
+// retryAfterSeconds rounds wait up to whole seconds, never below one and never above an hour.
+func retryAfterSeconds(wait time.Duration) int {
+	seconds := math.Ceil(wait.Seconds())
+	if seconds > maxRetryAfterSeconds {
+		return maxRetryAfterSeconds
+	}
+	return max(1, int(seconds))
 }

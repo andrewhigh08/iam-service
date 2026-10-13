@@ -1,10 +1,6 @@
-// Package apperror provides structured application error types.
-//
-// This package implements a consistent error handling pattern with:
-// - Error codes for programmatic handling
-// - Human-readable messages
-// - HTTP status code mapping
-// - Optional details and wrapped errors
+// Package apperror defines the structured error that crosses layer boundaries: a machine
+// readable code, a client-safe message, the HTTP status it maps to and an optional cause that
+// is never serialized.
 package apperror
 
 import (
@@ -13,37 +9,29 @@ import (
 	"net/http"
 )
 
-// Error codes for different error types.
+// Error codes sent to clients.
 const (
-	CodeNotFound           = "NOT_FOUND"           // Resource not found
-	CodeValidation         = "VALIDATION_ERROR"    // Validation failed
-	CodeUnauthorized       = "UNAUTHORIZED"        // Authentication required
-	CodeForbidden          = "FORBIDDEN"           // Access denied
-	CodeConflict           = "CONFLICT"            // Resource conflict
-	CodeInternal           = "INTERNAL_ERROR"      // Internal server error
-	CodeBadRequest         = "BAD_REQUEST"         // Invalid request
-	CodeTooManyRequests    = "TOO_MANY_REQUESTS"   // Rate limit exceeded
-	CodeServiceUnavailable = "SERVICE_UNAVAILABLE" // Service unavailable
-	CodePasswordExpired    = "PASSWORD_EXPIRED"    // Password has expired
+	CodeNotFound           = "NOT_FOUND"
+	CodeValidation         = "VALIDATION_ERROR"
+	CodeUnauthorized       = "UNAUTHORIZED"
+	CodeForbidden          = "FORBIDDEN"
+	CodeConflict           = "CONFLICT"
+	CodeInternal           = "INTERNAL_ERROR"
+	CodeBadRequest         = "BAD_REQUEST"
+	CodeTooManyRequests    = "TOO_MANY_REQUESTS"
+	CodeServiceUnavailable = "SERVICE_UNAVAILABLE"
 )
 
-// AppError represents a structured application error.
-//
-// Fields:
-//   - Code: Machine-readable error code
-//   - Message: Human-readable error message
-//   - HTTPStatus: Corresponding HTTP status code
-//   - Details: Additional error details
-//   - Err: Wrapped underlying error
+// AppError is a structured application error. HTTPStatus and Err are never serialized.
 type AppError struct {
-	Code       string         `json:"code"`              // Error code
-	Message    string         `json:"message"`           // Error message
-	HTTPStatus int            `json:"-"`                 // HTTP status
-	Details    map[string]any `json:"details,omitempty"` // Additional details
-	Err        error          `json:"-"`                 // Wrapped error
+	Code       string         `json:"code"`
+	Message    string         `json:"message"`
+	HTTPStatus int            `json:"-"`
+	Details    map[string]any `json:"details,omitempty"`
+	Err        error          `json:"-"`
 }
 
-// Error implements the error interface.
+// Error renders the code, the message and the cause when there is one.
 func (e *AppError) Error() string {
 	if e.Err != nil {
 		return fmt.Sprintf("%s: %s: %v", e.Code, e.Message, e.Err)
@@ -51,37 +39,16 @@ func (e *AppError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Code, e.Message)
 }
 
-// Unwrap returns the wrapped error for errors.Is/As support.
+// Unwrap returns the cause for errors.Is and errors.As.
 func (e *AppError) Unwrap() error {
 	return e.Err
 }
 
-// WithDetails adds details to the error and returns the modified error.
-func (e *AppError) WithDetails(details map[string]any) *AppError {
-	e.Details = details
-	return e
-}
-
-// WithError wraps an underlying error and returns the modified error.
-func (e *AppError) WithError(err error) *AppError {
-	e.Err = err
-	return e
-}
-
-// New creates a new AppError with the specified code, message, and HTTP status.
-func New(code, message string, httpStatus int) *AppError {
-	return &AppError{
-		Code:       code,
-		Message:    message,
-		HTTPStatus: httpStatus,
-	}
-}
-
-// NotFound creates a not found error for a specific resource.
+// NotFound reports that the resource with the given id does not exist.
 func NotFound(resource string, id any) *AppError {
 	return &AppError{
 		Code:       CodeNotFound,
-		Message:    fmt.Sprintf("%s not found", resource),
+		Message:    resource + " not found",
 		HTTPStatus: http.StatusNotFound,
 		Details: map[string]any{
 			"resource": resource,
@@ -90,7 +57,7 @@ func NotFound(resource string, id any) *AppError {
 	}
 }
 
-// ValidationError creates a validation error with details.
+// ValidationError reports invalid input, with details describing the violations.
 func ValidationError(message string, details map[string]any) *AppError {
 	return &AppError{
 		Code:       CodeValidation,
@@ -100,7 +67,7 @@ func ValidationError(message string, details map[string]any) *AppError {
 	}
 }
 
-// Unauthorized creates an authentication error.
+// Unauthorized reports a failed authentication; an empty message means "authentication required".
 func Unauthorized(message string) *AppError {
 	if message == "" {
 		message = "authentication required"
@@ -112,7 +79,7 @@ func Unauthorized(message string) *AppError {
 	}
 }
 
-// Forbidden creates an authorization/access denied error.
+// Forbidden reports a denied access; an empty message means "access denied".
 func Forbidden(message string) *AppError {
 	if message == "" {
 		message = "access denied"
@@ -124,7 +91,7 @@ func Forbidden(message string) *AppError {
 	}
 }
 
-// Conflict creates a resource conflict error (e.g., duplicate entry).
+// Conflict reports that a resource with the same field value already exists.
 func Conflict(resource, field string, value any) *AppError {
 	return &AppError{
 		Code:       CodeConflict,
@@ -138,7 +105,7 @@ func Conflict(resource, field string, value any) *AppError {
 	}
 }
 
-// Internal creates an internal server error with an optional wrapped error.
+// Internal reports a server-side failure, wrapping its cause when there is one.
 func Internal(message string, err error) *AppError {
 	return &AppError{
 		Code:       CodeInternal,
@@ -148,7 +115,7 @@ func Internal(message string, err error) *AppError {
 	}
 }
 
-// BadRequest creates a bad request error.
+// BadRequest reports a request the service cannot act on.
 func BadRequest(message string) *AppError {
 	return &AppError{
 		Code:       CodeBadRequest,
@@ -157,19 +124,19 @@ func BadRequest(message string) *AppError {
 	}
 }
 
-// TooManyRequests creates a rate limit exceeded error.
+// TooManyRequests reports an exceeded rate limit with the wait in seconds.
 func TooManyRequests(message string, retryAfter int) *AppError {
 	return &AppError{
 		Code:       CodeTooManyRequests,
 		Message:    message,
 		HTTPStatus: http.StatusTooManyRequests,
 		Details: map[string]any{
-			"retry_after_seconds": retryAfter, // Retry after X seconds
+			"retry_after_seconds": retryAfter,
 		},
 	}
 }
 
-// ServiceUnavailable creates a service unavailable error.
+// ServiceUnavailable reports that a dependency the request needs is down.
 func ServiceUnavailable(message string) *AppError {
 	return &AppError{
 		Code:       CodeServiceUnavailable,
@@ -178,27 +145,13 @@ func ServiceUnavailable(message string) *AppError {
 	}
 }
 
-// PasswordExpired creates a password expired error.
-func PasswordExpired(userID int64) *AppError {
-	return &AppError{
-		Code:       CodePasswordExpired,
-		Message:    "password has expired and must be changed",
-		HTTPStatus: http.StatusForbidden,
-		Details: map[string]any{
-			"user_id":                 userID,
-			"require_password_change": true,
-		},
-	}
-}
-
-// IsAppError checks if an error is an AppError.
+// IsAppError reports whether err is or wraps an AppError.
 func IsAppError(err error) bool {
 	var appErr *AppError
 	return errors.As(err, &appErr)
 }
 
-// AsAppError converts an error to AppError if possible.
-// Returns the AppError and true if successful, nil and false otherwise.
+// AsAppError returns the AppError that err is or wraps, and whether there is one.
 func AsAppError(err error) (*AppError, bool) {
 	var appErr *AppError
 	if errors.As(err, &appErr) {
@@ -207,8 +160,8 @@ func AsAppError(err error) (*AppError, bool) {
 	return nil, false
 }
 
-// FromError wraps a generic error as an internal AppError.
-// If the error is already an AppError, it returns it as-is.
+// FromError returns the AppError that err is or wraps, a generic internal error for any other
+// error, and nil for a nil error.
 func FromError(err error) *AppError {
 	if err == nil {
 		return nil

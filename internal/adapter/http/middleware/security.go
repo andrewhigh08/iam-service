@@ -1,162 +1,97 @@
-// Package middleware provides HTTP middleware components for the Gin framework.
 package middleware
 
 import (
+	"fmt"
 	"net/http"
+	"slices"
 	"strings"
+	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
-// SecurityConfig holds security middleware configuration.
-type SecurityConfig struct {
-	// CORS settings
-	AllowOrigins     []string // Allowed origins
-	AllowMethods     []string // Allowed HTTP methods
-	AllowHeaders     []string // Allowed request headers
-	ExposeHeaders    []string // Headers exposed to client
-	AllowCredentials bool     // Allow credentials
-	MaxAge           int      // Preflight cache duration (seconds)
+const (
+	contentSecurityPolicy   = "default-src 'none'; frame-ancestors 'none'"
+	strictTransportSecurity = "max-age=31536000; includeSubDomains"
+	corsMaxAge              = 12 * time.Hour
+)
 
-	// Security headers
-	ContentSecurityPolicy   string // CSP header value
-	XFrameOptions           string // X-Frame-Options header
-	XContentTypeOptions     string // X-Content-Type-Options header
-	XXSSProtection          string // X-XSS-Protection header
-	ReferrerPolicy          string // Referrer-Policy header
-	StrictTransportSecurity string // HSTS header
-}
-
-// DefaultSecurityConfig returns default security configuration.
-// Suitable for development. Use ProductionSecurityConfig for production.
-func DefaultSecurityConfig() SecurityConfig {
-	return SecurityConfig{
-		AllowOrigins:     []string{"*"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Request-ID"},
-		ExposeHeaders:    []string{"X-Request-ID", "X-RateLimit-Limit", "X-RateLimit-Remaining"},
-		AllowCredentials: true,
-		MaxAge:           86400, // 24 hours
-
-		ContentSecurityPolicy:   "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'",
-		XFrameOptions:           "DENY",
-		XContentTypeOptions:     "nosniff",
-		XXSSProtection:          "1; mode=block",
-		ReferrerPolicy:          "strict-origin-when-cross-origin",
-		StrictTransportSecurity: "max-age=31536000; includeSubDomains",
-	}
-}
-
-// ProductionSecurityConfig returns stricter security configuration for production.
-func ProductionSecurityConfig(allowedOrigins []string) SecurityConfig {
-	cfg := DefaultSecurityConfig()
-	cfg.AllowOrigins = allowedOrigins
-	cfg.ContentSecurityPolicy = "default-src 'none'"
-	return cfg
-}
-
-// SecurityHeaders returns a middleware that adds security headers to responses.
-//
-// Headers added:
-//   - X-Content-Type-Options: prevents MIME type sniffing
-//   - X-Frame-Options: prevents clickjacking
-//   - X-XSS-Protection: enables XSS filter
-//   - Referrer-Policy: controls referrer information
-//   - Content-Security-Policy: restricts resource loading
-//   - Strict-Transport-Security: enforces HTTPS
-func SecurityHeaders(config SecurityConfig) gin.HandlerFunc {
+// SecurityHeaders sets the response headers that harden every endpoint: nosniff, DENY framing,
+// no referrer, a deny-all CSP (except under /swagger, whose UI needs inline assets), no-store
+// caching for /auth and /api, and HSTS when the request arrived over TLS.
+func SecurityHeaders() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Set security headers
-		c.Header("X-Content-Type-Options", config.XContentTypeOptions)
-		c.Header("X-Frame-Options", config.XFrameOptions)
-		c.Header("X-XSS-Protection", config.XXSSProtection)
-		c.Header("Referrer-Policy", config.ReferrerPolicy)
+		h := c.Writer.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "no-referrer")
 
-		// Only set CSP for non-Swagger paths (Swagger needs inline scripts)
-		if !strings.HasPrefix(c.Request.URL.Path, "/swagger") {
-			c.Header("Content-Security-Policy", config.ContentSecurityPolicy)
+		path := c.Request.URL.Path
+		if !hasPathPrefix(path, "/swagger") {
+			h.Set("Content-Security-Policy", contentSecurityPolicy)
 		}
-
-		// HSTS only for HTTPS connections
+		if hasPathPrefix(path, "/auth") || hasPathPrefix(path, "/api") {
+			h.Set("Cache-Control", "no-store")
+		}
 		if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
-			c.Header("Strict-Transport-Security", config.StrictTransportSecurity)
+			h.Set("Strict-Transport-Security", strictTransportSecurity)
 		}
-
 		c.Next()
 	}
 }
 
-// CORS returns a middleware that handles Cross-Origin Resource Sharing.
-//
-// Handles preflight OPTIONS requests and sets appropriate CORS headers.
-func CORS(config SecurityConfig) gin.HandlerFunc {
-	allowAllOrigins := len(config.AllowOrigins) == 1 && config.AllowOrigins[0] == "*"
-
-	return func(c *gin.Context) {
-		origin := c.GetHeader("Origin")
-
-		// Handle preflight requests
-		if c.Request.Method == http.MethodOptions {
-			switch {
-			case allowAllOrigins:
-				c.Header("Access-Control-Allow-Origin", "*")
-			case isOriginAllowed(origin, config.AllowOrigins):
-				c.Header("Access-Control-Allow-Origin", origin)
-			default:
-				c.AbortWithStatus(http.StatusForbidden)
-				return
-			}
-
-			c.Header("Access-Control-Allow-Methods", strings.Join(config.AllowMethods, ", "))
-			c.Header("Access-Control-Allow-Headers", strings.Join(config.AllowHeaders, ", "))
-			c.Header("Access-Control-Max-Age", string(rune(config.MaxAge)))
-
-			// Don't allow credentials with wildcard origin
-			if config.AllowCredentials && !allowAllOrigins {
-				c.Header("Access-Control-Allow-Credentials", "true")
-			}
-
-			c.AbortWithStatus(http.StatusNoContent)
-			return
+// NewCORS builds the CORS middleware for allowedOrigins and returns nil when the list is empty,
+// in which case the caller leaves CORS disabled. "*" allows every origin without credentials;
+// explicit origins (full scheme and host, one "*" wildcard allowed) are served with credentials.
+// An origin the CORS library would reject is reported as an error instead of a panic.
+func NewCORS(allowedOrigins []string) (gin.HandlerFunc, error) {
+	origins := make([]string, 0, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		if o = strings.TrimSpace(o); o != "" {
+			origins = append(origins, o)
 		}
-
-		// Handle actual requests
-		switch {
-		case allowAllOrigins:
-			c.Header("Access-Control-Allow-Origin", "*")
-		case isOriginAllowed(origin, config.AllowOrigins):
-			c.Header("Access-Control-Allow-Origin", origin)
-			if config.AllowCredentials {
-				c.Header("Access-Control-Allow-Credentials", "true")
-			}
-		}
-
-		// Expose headers to client
-		if len(config.ExposeHeaders) > 0 {
-			c.Header("Access-Control-Expose-Headers", strings.Join(config.ExposeHeaders, ", "))
-		}
-
-		c.Next()
 	}
+	if len(origins) == 0 {
+		return nil, nil
+	}
+
+	for _, o := range origins {
+		if err := validateOrigin(o); err != nil {
+			return nil, fmt.Errorf("invalid CORS origins %q: %w", origins, err)
+		}
+	}
+	wildcard := slices.Contains(origins, "*")
+	cfg := cors.Config{
+		AllowOrigins:     origins,
+		AllowWildcard:    !wildcard,
+		AllowMethods:     []string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodDelete, http.MethodOptions},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", RequestIDHeader},
+		ExposeHeaders:    []string{RequestIDHeader},
+		AllowCredentials: !wildcard,
+		MaxAge:           corsMaxAge,
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid CORS origins %q: %w", origins, err)
+	}
+	return cors.New(cfg), nil
 }
 
-// isOriginAllowed checks if the origin is in the allowed list.
-func isOriginAllowed(origin string, allowed []string) bool {
-	for _, a := range allowed {
-		if a == origin || a == "*" {
-			return true
-		}
+// validateOrigin rejects the origins the CORS library would panic on: anything but "*" must
+// carry an http or https scheme and may hold at most one wildcard.
+func validateOrigin(origin string) error {
+	switch {
+	case origin == "*":
+		return nil
+	case !strings.HasPrefix(origin, "http://") && !strings.HasPrefix(origin, "https://"):
+		return fmt.Errorf("origin %q must start with http:// or https://", origin)
+	case strings.Count(origin, "*") > 1:
+		return fmt.Errorf("origin %q may contain at most one wildcard", origin)
 	}
-	return false
+	return nil
 }
 
-// NoCache returns a middleware that adds cache-control headers to prevent caching.
-// Use this for sensitive endpoints like authentication.
-func NoCache() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")
-		c.Header("Pragma", "no-cache")
-		c.Header("Expires", "0")
-		c.Next()
-	}
+// hasPathPrefix reports whether path is prefix itself or lies under it.
+func hasPathPrefix(path, prefix string) bool {
+	return path == prefix || strings.HasPrefix(path, prefix+"/")
 }

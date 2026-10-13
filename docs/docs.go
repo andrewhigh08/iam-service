@@ -9,12 +9,46 @@ const docTemplate = `{
     "info": {
         "description": "{{escape .Description}}",
         "title": "{{.Title}}",
-        "contact": {},
+        "contact": {
+            "name": "API Support",
+            "url": "https://github.com/andrewhigh08/iam-service"
+        },
+        "license": {
+            "name": "MIT",
+            "url": "https://opensource.org/licenses/MIT"
+        },
         "version": "{{.Version}}"
     },
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/.well-known/jwks.json": {
+            "get": {
+                "description": "Returns the JSON Web Key Set (RFC 7517) needed to verify access tokens.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Public signing keys",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/change-password": {
             "post": {
                 "security": [
@@ -22,7 +56,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Change password for authenticated user",
+                "description": "Replaces the caller's password, ends every other session and returns a fresh token pair. The new password must satisfy the password policy.",
                 "consumes": [
                     "application/json"
                 ],
@@ -35,7 +69,7 @@ const docTemplate = `{
                 "summary": "Change password",
                 "parameters": [
                     {
-                        "description": "Password change data",
+                        "description": "Current and new password",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -48,7 +82,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/response.APIResponse"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/handler.TokenPairResponse"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "400": {
@@ -66,6 +112,150 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/logout-all": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Ends every session of the caller and revokes all access tokens issued so far.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Log out everywhere",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/handler.MessageResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/sessions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lists the live sessions of the caller; the one serving this request is marked current.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "List sessions",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/handler.SessionsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/sessions/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Ends one session of the caller by its id and revokes the access token issued with it.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Revoke a session",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Session id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/handler.MessageResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/users": {
             "get": {
                 "security": [
@@ -73,10 +263,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Get paginated list of users with optional filtering",
-                "consumes": [
-                    "application/json"
-                ],
+                "description": "Lists users page by page, optionally filtered by status and a search over email and name.",
                 "produces": [
                     "application/json"
                 ],
@@ -88,27 +275,27 @@ const docTemplate = `{
                     {
                         "type": "string",
                         "default": "all",
-                        "description": "Filter by status: active, blocked, all",
+                        "description": "all, active or blocked",
                         "name": "status",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Search by email or name",
+                        "description": "Substring of the email or full name",
                         "name": "search",
                         "in": "query"
                     },
                     {
                         "type": "integer",
                         "default": 1,
-                        "description": "Page number",
+                        "description": "Page number, from 1",
                         "name": "page",
                         "in": "query"
                     },
                     {
                         "type": "integer",
                         "default": 10,
-                        "description": "Items per page (max 100)",
+                        "description": "Users per page, 1 to 100",
                         "name": "page_size",
                         "in": "query"
                     }
@@ -135,6 +322,12 @@ const docTemplate = `{
                             ]
                         }
                     },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
@@ -155,7 +348,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Create a new user with specified role",
+                "description": "Creates a user with the given role. The password must satisfy the password policy.",
                 "consumes": [
                     "application/json"
                 ],
@@ -165,10 +358,10 @@ const docTemplate = `{
                 "tags": [
                     "users"
                 ],
-                "summary": "Create user",
+                "summary": "Create a user",
                 "parameters": [
                     {
-                        "description": "User data",
+                        "description": "New user",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -230,21 +423,17 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Get user details by ID",
-                "consumes": [
-                    "application/json"
-                ],
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "users"
                 ],
-                "summary": "Get user",
+                "summary": "Get a user",
                 "parameters": [
                     {
                         "type": "integer",
-                        "description": "User ID",
+                        "description": "User id",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -296,6 +485,77 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/users/{id}/audit": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lists the most recent audit entries recorded for actions of the user, newest first. An id without entries yields an empty list.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "audit"
+                ],
+                "summary": "List a user's audit trail",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Entries to return, 1 to 100",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/handler.AuditEntriesResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/users/{id}/block": {
             "post": {
                 "security": [
@@ -303,21 +563,18 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Block a user account",
-                "consumes": [
-                    "application/json"
-                ],
+                "description": "Blocks the account and ends all of its sessions and tokens.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "users"
                 ],
-                "summary": "Block user",
+                "summary": "Block a user",
                 "parameters": [
                     {
                         "type": "integer",
-                        "description": "User ID",
+                        "description": "User id",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -327,7 +584,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/response.APIResponse"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/handler.MessageResponse"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "400": {
@@ -364,21 +633,17 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Unblock a user account",
-                "consumes": [
-                    "application/json"
-                ],
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "users"
                 ],
-                "summary": "Unblock user",
+                "summary": "Unblock a user",
                 "parameters": [
                     {
                         "type": "integer",
-                        "description": "User ID",
+                        "description": "User id",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -388,7 +653,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/response.APIResponse"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/handler.MessageResponse"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "400": {
@@ -418,9 +695,9 @@ const docTemplate = `{
                 }
             }
         },
-        "/auth/first-time-password-change": {
+        "/auth/change-password": {
             "post": {
-                "description": "Change one-time password to permanent password",
+                "description": "Completes a login that required a password change. Only allowed while the password is temporary or expired; rate limited like login.",
                 "consumes": [
                     "application/json"
                 ],
@@ -430,15 +707,15 @@ const docTemplate = `{
                 "tags": [
                     "auth"
                 ],
-                "summary": "First-time password change",
+                "summary": "Change a temporary or expired password",
                 "parameters": [
                     {
-                        "description": "Password change data",
+                        "description": "Email, current and new password",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler.FirstTimePasswordChangeRequest"
+                            "$ref": "#/definitions/handler.ChangeRequiredPasswordRequest"
                         }
                     }
                 ],
@@ -454,7 +731,7 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/handler.FirstTimePasswordChangeResponse"
+                                            "$ref": "#/definitions/handler.TokenPairResponse"
                                         }
                                     }
                                 }
@@ -466,13 +743,25 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/response.APIResponse"
                         }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
                     }
                 }
             }
         },
         "/auth/login": {
             "post": {
-                "description": "Authenticate user and get JWT token",
+                "description": "Checks the credentials and issues a token pair. When the password is temporary or expired the response carries require_password_change=true and a reason instead of tokens.",
                 "consumes": [
                     "application/json"
                 ],
@@ -482,10 +771,10 @@ const docTemplate = `{
                 "tags": [
                     "auth"
                 ],
-                "summary": "User login",
+                "summary": "Log in",
                 "parameters": [
                     {
-                        "description": "Login credentials",
+                        "description": "Credentials",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -524,23 +813,119 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/response.APIResponse"
                         }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
                     }
                 }
             }
         },
-        "/health": {
-            "get": {
-                "description": "Basic health check",
+        "/auth/logout": {
+            "post": {
+                "description": "Ends the session of the refresh token and revokes the access token given in the body or in the Authorization header.",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "health"
+                    "auth"
                 ],
-                "summary": "Health check",
+                "summary": "Log out",
+                "parameters": [
+                    {
+                        "description": "Tokens to invalidate",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.LogoutRequest"
+                        }
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/handler.MessageResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/refresh": {
+            "post": {
+                "description": "Rotates the refresh token and issues a new token pair. The previous refresh token stops working.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Refresh tokens",
+                "parameters": [
+                    {
+                        "description": "Refresh token",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.RefreshRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/handler.TokenPairResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/response.APIResponse"
                         }
@@ -550,7 +935,7 @@ const docTemplate = `{
         },
         "/health/live": {
             "get": {
-                "description": "Check if the service is alive",
+                "description": "Reports that the process is running and which version it is.",
                 "produces": [
                     "application/json"
                 ],
@@ -562,7 +947,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handler.HealthStatus"
+                            "$ref": "#/definitions/handler.LiveResponse"
                         }
                     }
                 }
@@ -570,7 +955,7 @@ const docTemplate = `{
         },
         "/health/ready": {
             "get": {
-                "description": "Check if the service is ready to accept requests",
+                "description": "Pings the database and Redis; answers 503 with status \"degraded\" when either is unreachable.",
                 "produces": [
                     "application/json"
                 ],
@@ -582,13 +967,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handler.HealthStatus"
+                            "$ref": "#/definitions/handler.ReadyResponse"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/handler.HealthStatus"
+                            "$ref": "#/definitions/handler.ReadyResponse"
                         }
                     }
                 }
@@ -596,6 +981,53 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "handler.AuditEntriesResponse": {
+            "type": "object",
+            "properties": {
+                "entries": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handler.AuditEntryResponse"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handler.AuditEntryResponse": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "actor_id": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "details": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "ip": {
+                    "type": "string"
+                },
+                "resource_id": {
+                    "type": "string"
+                },
+                "resource_type": {
+                    "type": "string"
+                },
+                "user_agent": {
+                    "type": "string"
+                }
+            }
+        },
         "handler.ChangePasswordRequest": {
             "type": "object",
             "required": [
@@ -604,8 +1036,26 @@ const docTemplate = `{
             ],
             "properties": {
                 "new_password": {
-                    "type": "string",
-                    "minLength": 8
+                    "type": "string"
+                },
+                "old_password": {
+                    "type": "string"
+                }
+            }
+        },
+        "handler.ChangeRequiredPasswordRequest": {
+            "type": "object",
+            "required": [
+                "email",
+                "new_password",
+                "old_password"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "new_password": {
+                    "type": "string"
                 },
                 "old_password": {
                     "type": "string"
@@ -639,15 +1089,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "password": {
-                    "type": "string",
-                    "minLength": 8
+                    "type": "string"
                 },
-                "password_type": {
-                    "type": "string",
-                    "enum": [
-                        "permanent",
-                        "onetime"
-                    ]
+                "password_temporary": {
+                    "type": "boolean"
                 },
                 "role": {
                     "type": "string",
@@ -676,63 +1121,6 @@ const docTemplate = `{
                 }
             }
         },
-        "handler.FirstTimePasswordChangeRequest": {
-            "type": "object",
-            "required": [
-                "new_password",
-                "old_password",
-                "user_id"
-            ],
-            "properties": {
-                "new_password": {
-                    "type": "string",
-                    "minLength": 8
-                },
-                "old_password": {
-                    "type": "string"
-                },
-                "user_id": {
-                    "type": "integer"
-                }
-            }
-        },
-        "handler.FirstTimePasswordChangeResponse": {
-            "type": "object",
-            "properties": {
-                "access_token": {
-                    "type": "string"
-                },
-                "message": {
-                    "type": "string"
-                },
-                "roles": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "token_type": {
-                    "type": "string"
-                }
-            }
-        },
-        "handler.HealthStatus": {
-            "type": "object",
-            "properties": {
-                "checks": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "$ref": "#/definitions/handler.Check"
-                    }
-                },
-                "status": {
-                    "type": "string"
-                },
-                "timestamp": {
-                    "type": "string"
-                }
-            }
-        },
         "handler.ListUsersResponse": {
             "type": "object",
             "properties": {
@@ -741,6 +1129,17 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/handler.UserResponse"
                     }
+                }
+            }
+        },
+        "handler.LiveResponse": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
@@ -765,11 +1164,16 @@ const docTemplate = `{
                 "access_token": {
                     "type": "string"
                 },
-                "message": {
+                "expires_in": {
+                    "type": "integer"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "refresh_token": {
                     "type": "string"
                 },
                 "require_password_change": {
-                    "description": "For OTP flow",
                     "type": "boolean"
                 },
                 "token_type": {
@@ -777,9 +1181,107 @@ const docTemplate = `{
                 },
                 "user": {
                     "$ref": "#/definitions/handler.UserInfo"
+                }
+            }
+        },
+        "handler.LogoutRequest": {
+            "type": "object",
+            "required": [
+                "refresh_token"
+            ],
+            "properties": {
+                "access_token": {
+                    "type": "string"
                 },
-                "user_id": {
+                "refresh_token": {
+                    "type": "string"
+                }
+            }
+        },
+        "handler.MessageResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "handler.ReadyResponse": {
+            "type": "object",
+            "properties": {
+                "checks": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/handler.Check"
+                    }
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "handler.RefreshRequest": {
+            "type": "object",
+            "required": [
+                "refresh_token"
+            ],
+            "properties": {
+                "refresh_token": {
+                    "type": "string"
+                }
+            }
+        },
+        "handler.SessionResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "current": {
+                    "type": "boolean"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "ip": {
+                    "type": "string"
+                },
+                "user_agent": {
+                    "type": "string"
+                }
+            }
+        },
+        "handler.SessionsResponse": {
+            "type": "object",
+            "properties": {
+                "sessions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handler.SessionResponse"
+                    }
+                },
+                "total": {
                     "type": "integer"
+                }
+            }
+        },
+        "handler.TokenPairResponse": {
+            "type": "object",
+            "properties": {
+                "access_token": {
+                    "type": "string"
+                },
+                "expires_in": {
+                    "type": "integer"
+                },
+                "refresh_token": {
+                    "type": "string"
+                },
+                "token_type": {
+                    "type": "string"
                 }
             }
         },
@@ -843,7 +1345,7 @@ const docTemplate = `{
                 },
                 "details": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "message": {
                     "type": "string"
@@ -867,17 +1369,25 @@ const docTemplate = `{
                 }
             }
         }
+    },
+    "securityDefinitions": {
+        "BearerAuth": {
+            "description": "Type \"Bearer\" followed by a space and the access token.",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        }
     }
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "",
-	Host:             "",
-	BasePath:         "",
-	Schemes:          []string{},
-	Title:            "",
-	Description:      "",
+	Version:          "1.0",
+	Host:             "localhost:8080",
+	BasePath:         "/",
+	Schemes:          []string{"http", "https"},
+	Title:            "IAM Service API",
+	Description:      "Identity and Access Management service: login with RS256 access tokens and rotating refresh tokens, session management, role-based authorization and user administration. Every JSON endpoint except the JWKS and health probes answers with the {success, data, error, meta} envelope.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

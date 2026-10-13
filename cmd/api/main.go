@@ -1,327 +1,51 @@
-// Package main is the entry point for the IAM Service API server.
-//
-// The IAM Service provides authentication, authorization, and user management
-// capabilities using JWT tokens and Casbin RBAC.
+// Package main is the entry point of the IAM service HTTP server.
 package main
 
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
-
-	rediscache "github.com/andrewhigh08/iam-service/internal/adapter/cache/redis"
-	"github.com/andrewhigh08/iam-service/internal/adapter/http/handler"
-	"github.com/andrewhigh08/iam-service/internal/adapter/http/middleware"
-	postgresrepo "github.com/andrewhigh08/iam-service/internal/adapter/repository/postgres"
+	"github.com/andrewhigh08/iam-service/internal/app"
 	"github.com/andrewhigh08/iam-service/internal/config"
 	"github.com/andrewhigh08/iam-service/internal/pkg/logger"
-	"github.com/andrewhigh08/iam-service/internal/pkg/telemetry"
-	"github.com/andrewhigh08/iam-service/internal/service"
-
-	// Swagger docs
-	_ "github.com/andrewhigh08/iam-service/docs"
 )
 
-// main is the application entry point.
-//
-// Initializes all dependencies and starts the HTTP server with graceful shutdown.
+// version is the build version, injected with -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
-	// Load configuration
-	// MustLoad panics if config is invalid, which is desired at startup
-	cfg := config.MustLoad()
-
-	// Initialize logger
-	log := logger.New(logger.Config{
-		Level:     getEnv("LOG_LEVEL", "info"),
-		Format:    getEnv("LOG_FORMAT", "json"),
-		AddSource: true,
-	})
-	logger.SetDefault(log)
-
-	// Initialize telemetry
-	telemetryCfg := telemetry.Config{
-		Enabled:      cfg.Telemetry.Enabled,
-		OTLPEndpoint: cfg.Telemetry.OTLPEndpoint,
-		ServiceName:  cfg.Telemetry.ServiceName,
-		Environment:  cfg.Telemetry.Environment,
-	}
-	tp, err := telemetry.InitTelemetry(context.Background(), telemetryCfg)
-	if err != nil {
-		log.Error("failed to initialize telemetry", "error", err)
-	} else if cfg.Telemetry.Enabled {
-		log.Info("telemetry initialized", "endpoint", cfg.Telemetry.OTLPEndpoint)
-	}
-
-	// Initialize database connection
-	db, err := initDB(cfg, log)
-	if err != nil {
-		log.Fatal("failed to connect to database", "error", err)
-	}
-
-	// Initialize Redis connection
-	redisClient := initRedis(cfg, log)
-
-	// Initialize caches
-	authzCache := rediscache.NewAuthorizationCache(redisClient)
-	refreshTokenCache := rediscache.NewRefreshTokenCache(redisClient)
-	tokenCache := rediscache.NewTokenCache(redisClient)
-	rateLimitCache := rediscache.NewRateLimitCache(redisClient)
-
-	// Initialize repositories
-	userRepo := postgresrepo.NewUserRepository(db)
-	auditRepo := postgresrepo.NewAuditLogRepository(db)
-	txManager := postgresrepo.NewTransactionManager(db)
-
-	// Initialize services
-	authzService, err := service.NewAuthorizationService(db, authzCache, cfg.Casbin.ModelPath, log)
-	if err != nil {
-		log.Fatal("failed to initialize authorization service", "error", err)
-	}
-
-	auditService := service.NewAuditService(auditRepo, log)
-	userService := service.NewUserService(userRepo, txManager, authzService, auditService, log)
-
-	authServiceCfg := service.AuthServiceConfig{
-		PrivateKeyPath:   cfg.JWT.PrivateKeyPath,
-		PublicKeyPath:    cfg.JWT.PublicKeyPath,
-		TokenTTL:         time.Duration(cfg.JWT.AccessTokenTTL) * time.Minute,
-		RefreshTTL:       time.Duration(cfg.JWT.RefreshTokenTTL) * time.Hour,
-		MaxLoginAttempts: cfg.Lockout.MaxAttempts,
-		LockoutDuration:  time.Duration(cfg.Lockout.LockoutDuration) * time.Minute,
-		PasswordMaxAge:   time.Duration(cfg.Password.MaxAgeDays) * 24 * time.Hour,
-		DevMode:          cfg.DevMode,
-	}
-	authService, err := service.NewAuthService(userRepo, authzService, auditService, refreshTokenCache, tokenCache, rateLimitCache, authServiceCfg, log)
-	if err != nil {
-		log.Fatal("failed to initialize auth service", "error", err)
-	}
-
-	// Initialize HTTP handlers
-	healthHandler := handler.NewHealthHandler(db, redisClient)
-	authHandler := handler.NewAuthHandler(authService, authzService, log)
-	userHandler := handler.NewUserHandler(userService, log)
-
-	// Initialize rate limiter
-	rateLimitCfg := middleware.DefaultRateLimitConfig()
-	rateLimiter := middleware.NewIPRateLimiter(rateLimitCfg)
-
-	// Setup router with all routes
-	securityCfg := middleware.DefaultSecurityConfig()
-	router := setupRouter(healthHandler, authHandler, userHandler, securityCfg, rateLimiter)
-
-	// Seed database with initial data
-	seeder := service.NewSeeder(db, authzService, log)
-	if err := seeder.SeedAll(context.Background()); err != nil {
-		log.Error("failed to seed database", "error", err)
-	}
-
-	// Configure HTTP server
-	srv := &http.Server{
-		Addr:         ":" + cfg.Server.Port,
-		Handler:      router,
-		ReadTimeout:  15 * time.Second, // Max time to read request
-		WriteTimeout: 15 * time.Second, // Max time to write response
-		IdleTimeout:  60 * time.Second, // Max time for keep-alive
-	}
-
-	// Start server in goroutine
-	go func() {
-		log.Info("server starting", "port", cfg.Server.Port)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatal("failed to start server", "error", err)
-		}
-	}()
-
-	// Graceful shutdown handling
-	// Wait for interrupt signal
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
-	log.Info("shutting down server...")
-
-	// Give outstanding requests time to complete
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Error("server forced to shutdown", "error", err)
-	}
-
-	// Shutdown telemetry
-	if tp != nil {
-		if err := tp.Shutdown(ctx); err != nil {
-			log.Error("failed to shutdown telemetry", "error", err)
-		}
-	}
-
-	// Close database connection
-	if sqlDB, err := db.DB(); err == nil {
-		_ = sqlDB.Close()
-	}
-
-	// Close Redis connection
-	if redisClient != nil {
-		_ = redisClient.Close()
-	}
-
-	log.Info("server exited properly")
+	os.Exit(run())
 }
 
-// initDB initializes the PostgreSQL database connection with connection pooling.
-func initDB(cfg *config.Config, log *logger.Logger) (*gorm.DB, error) {
-	db, err := gorm.Open(postgres.Open(cfg.Database.DSN()), &gorm.Config{
-		Logger: gormlogger.Default.LogMode(gormlogger.Warn),
-	})
+// run loads the configuration, builds the application and serves it until SIGINT or SIGTERM.
+func run() int {
+	cfg, err := config.Load()
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database connection: %w", err)
+		fmt.Fprintf(os.Stderr, "iam-service: invalid configuration: %v\n", err)
+		return 1
 	}
 
-	sqlDB, err := db.DB()
+	logCfg := logger.DefaultConfig()
+	logCfg.Level = cfg.Log.Level
+	logCfg.Format = cfg.Log.Format
+	log := logger.New(logCfg)
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	log.Info("starting iam-service", "version", version)
+	application, err := app.New(ctx, cfg, log, version)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get underlying sql.DB: %w", err)
+		log.Error("failed to start iam-service", "error", err)
+		return 1
 	}
-
-	// Configure connection pool
-	sqlDB.SetMaxIdleConns(10)           // Max idle connections
-	sqlDB.SetMaxOpenConns(100)          // Max open connections
-	sqlDB.SetConnMaxLifetime(time.Hour) // Connection max lifetime
-
-	// Verify connection with ping
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := sqlDB.PingContext(ctx); err != nil {
-		return nil, fmt.Errorf("failed to ping database: %w", err)
+	if err := application.Run(ctx); err != nil {
+		log.Error("iam-service stopped with an error", "error", err)
+		return 1
 	}
-
-	log.Info("database connection established")
-	return db, nil
-}
-
-// initRedis initializes the Redis client connection.
-func initRedis(cfg *config.Config, log *logger.Logger) *redis.Client {
-	client := redis.NewClient(&redis.Options{
-		Addr:     fmt.Sprintf("%s:%s", cfg.Redis.Host, cfg.Redis.Port),
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.DB,
-	})
-
-	// Verify connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	if err := client.Ping(ctx).Err(); err != nil {
-		cancel()
-		log.Fatal("failed to connect to Redis", "error", err)
-	}
-	cancel()
-
-	log.Info("redis connection established")
-	return client
-}
-
-// setupRouter configures the Gin router with all routes and middleware.
-func setupRouter(
-	healthHandler *handler.HealthHandler,
-	authHandler *handler.AuthHandler,
-	userHandler *handler.UserHandler,
-	securityCfg middleware.SecurityConfig,
-	rateLimiter *middleware.IPRateLimiter,
-) *gin.Engine {
-	gin.SetMode(gin.ReleaseMode)
-	router := gin.New()
-
-	// Configure trusted proxies to prevent IP spoofing via X-Forwarded-For
-	// Only trust localhost proxies by default. Add your load balancer IPs in production.
-	if err := router.SetTrustedProxies([]string{"127.0.0.1", "::1"}); err != nil {
-		logger.Default().Error("failed to set trusted proxies", "error", err)
-	}
-
-	// Global middleware
-	router.Use(gin.Recovery())                              // Panic recovery
-	router.Use(middleware.RequestID())                      // Request ID
-	router.Use(middleware.SecurityHeaders(securityCfg))     // Security headers
-	router.Use(middleware.CORS(securityCfg))                // CORS
-	router.Use(middleware.RateLimitMiddleware(rateLimiter)) // Global rate limiting
-	router.Use(middleware.Metrics())                        // Prometheus metrics
-	router.Use(requestLogger())                             // Request logging
-
-	// Health check endpoints for Kubernetes probes
-	router.GET("/health", healthHandler.Health)
-	router.GET("/health/live", healthHandler.Live)
-	router.GET("/health/ready", healthHandler.Ready)
-
-	// Metrics endpoint for Prometheus
-	handler.RegisterMetrics(router)
-
-	// Swagger documentation
-	handler.RegisterSwagger(router)
-
-	// Public authentication endpoints
-	auth := router.Group("/auth")
-	// Login has stricter rate limiting to prevent brute-force attacks
-	auth.POST("/login", middleware.LoginRateLimitMiddleware(rateLimiter), authHandler.Login)
-	auth.POST("/first-time-password-change", authHandler.FirstTimePasswordChange)
-	auth.POST("/refresh", authHandler.RefreshToken) // Refresh access token
-	auth.POST("/logout", authHandler.Logout)        // Logout (invalidate refresh token)
-
-	// Protected API endpoints (require authentication)
-	api := router.Group("/api/v1")
-	api.Use(authHandler.AuthMiddleware())
-
-	// Password change (available to all authenticated users)
-	api.POST("/change-password", authHandler.ChangePassword)
-	api.POST("/logout-all", authHandler.LogoutAll) // Logout from all devices
-
-	// Session management endpoints (available to all authenticated users)
-	api.GET("/sessions", authHandler.GetSessions)          // List active sessions
-	api.DELETE("/sessions/:id", authHandler.RevokeSession) // Revoke a session
-
-	// User management endpoints
-	users := api.Group("/users")
-	users.GET("", authHandler.RBACMiddleware("users", "read"), userHandler.ListUsers)
-	users.GET("/:id", authHandler.RBACMiddleware("users", "read"), userHandler.GetUser)
-	users.POST("", authHandler.RBACMiddleware("users", "write"), userHandler.CreateUser)
-	users.POST("/:id/block", authHandler.RBACMiddleware("users", "write"), userHandler.BlockUser)
-	users.POST("/:id/unblock", authHandler.RBACMiddleware("users", "write"), userHandler.UnblockUser)
-
-	return router
-}
-
-// requestLogger returns a middleware that logs HTTP requests.
-func requestLogger() gin.HandlerFunc {
-	log := logger.Default()
-	return func(c *gin.Context) {
-		start := time.Now()
-		path := c.Request.URL.Path
-
-		// Process request
-		c.Next()
-
-		// Log after request completion
-		log.LogRequest(
-			c.Request.Method,
-			path,
-			c.Writer.Status(),
-			time.Since(start),
-			c.ClientIP(),
-		)
-	}
-}
-
-// getEnv returns environment variable value or default if not set.
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
+	log.Info("iam-service stopped")
+	return 0
 }

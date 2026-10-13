@@ -1,4 +1,4 @@
-// Package telemetry provides OpenTelemetry instrumentation for distributed tracing.
+// Package telemetry configures OpenTelemetry tracing for the service.
 package telemetry
 
 import (
@@ -6,140 +6,71 @@ import (
 	"fmt"
 
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
-	"go.opentelemetry.io/otel/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 )
 
-// Config holds telemetry configuration.
+// Config selects the exporter target and the resource attributes attached to every span.
 type Config struct {
+	Enabled        bool
+	Endpoint       string // OTLP gRPC endpoint as host:port
 	ServiceName    string
 	ServiceVersion string
 	Environment    string
-	OTLPEndpoint   string
-	Enabled        bool
 }
 
-// DefaultConfig returns default telemetry configuration.
-func DefaultConfig() Config {
-	return Config{
-		ServiceName:    "iam-service",
-		ServiceVersion: "1.0.0",
-		Environment:    "development",
-		OTLPEndpoint:   "localhost:4317",
-		Enabled:        false,
-	}
-}
-
-// Provider wraps OpenTelemetry providers.
+// Provider owns the tracer provider created by Init.
 type Provider struct {
-	TracerProvider *sdktrace.TracerProvider
-	Tracer         trace.Tracer
+	tp *sdktrace.TracerProvider
 }
 
-// InitTelemetry initializes OpenTelemetry with the given configuration.
-func InitTelemetry(ctx context.Context, cfg Config) (*Provider, error) {
+// Init installs an OTLP gRPC exporter, the service resource, a parent-based sampler and W3C
+// propagation as the global OpenTelemetry setup. When cfg.Enabled is false it returns a
+// provider whose Shutdown is a no-op and leaves the globals untouched.
+func Init(ctx context.Context, cfg Config) (*Provider, error) {
 	if !cfg.Enabled {
-		// Return a no-op provider when disabled
-		tp := sdktrace.NewTracerProvider()
-		otel.SetTracerProvider(tp)
-		return &Provider{
-			TracerProvider: tp,
-			Tracer:         tp.Tracer(cfg.ServiceName),
-		}, nil
+		return &Provider{}, nil
 	}
 
-	// Create OTLP exporter
 	exporter, err := otlptracegrpc.New(ctx,
-		otlptracegrpc.WithEndpoint(cfg.OTLPEndpoint),
+		otlptracegrpc.WithEndpoint(cfg.Endpoint),
 		otlptracegrpc.WithInsecure(),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
+		return nil, fmt.Errorf("create OTLP exporter: %w", err)
 	}
 
-	// Create resource
-	res, err := resource.Merge(
-		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceName(cfg.ServiceName),
-			semconv.ServiceVersion(cfg.ServiceVersion),
-			attribute.String("environment", cfg.Environment),
-		),
-	)
+	res, err := resource.Merge(resource.Default(), resource.NewWithAttributes(
+		semconv.SchemaURL,
+		semconv.ServiceName(cfg.ServiceName),
+		semconv.ServiceVersion(cfg.ServiceVersion),
+		semconv.DeploymentEnvironmentNameKey.String(cfg.Environment),
+	))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create resource: %w", err)
+		return nil, fmt.Errorf("build resource: %w", err)
 	}
 
-	// Create tracer provider
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exporter),
 		sdktrace.WithResource(res),
-		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample())),
 	)
-
-	// Set global providers
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{},
 		propagation.Baggage{},
 	))
 
-	return &Provider{
-		TracerProvider: tp,
-		Tracer:         tp.Tracer(cfg.ServiceName),
-	}, nil
+	return &Provider{tp: tp}, nil
 }
 
-// Shutdown gracefully shuts down the telemetry provider.
+// Shutdown flushes pending spans and stops the exporter. It is a no-op when tracing is disabled.
 func (p *Provider) Shutdown(ctx context.Context) error {
-	if p.TracerProvider != nil {
-		return p.TracerProvider.Shutdown(ctx)
+	if p == nil || p.tp == nil {
+		return nil
 	}
-	return nil
+	return p.tp.Shutdown(ctx)
 }
-
-// StartSpan starts a new span.
-func (p *Provider) StartSpan(ctx context.Context, name string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
-	return p.Tracer.Start(ctx, name, opts...)
-}
-
-// SpanFromContext returns the current span from context.
-func SpanFromContext(ctx context.Context) trace.Span {
-	return trace.SpanFromContext(ctx)
-}
-
-// AddSpanAttributes adds attributes to the current span.
-func AddSpanAttributes(ctx context.Context, attrs ...attribute.KeyValue) {
-	span := trace.SpanFromContext(ctx)
-	span.SetAttributes(attrs...)
-}
-
-// AddSpanEvent adds an event to the current span.
-func AddSpanEvent(ctx context.Context, name string, attrs ...attribute.KeyValue) {
-	span := trace.SpanFromContext(ctx)
-	span.AddEvent(name, trace.WithAttributes(attrs...))
-}
-
-// RecordError records an error in the current span.
-func RecordError(ctx context.Context, err error) {
-	span := trace.SpanFromContext(ctx)
-	span.RecordError(err)
-}
-
-// Common attribute keys.
-var (
-	AttrUserID      = attribute.Key("user.id")
-	AttrEmail       = attribute.Key("user.email")
-	AttrResource    = attribute.Key("authz.resource")
-	AttrAction      = attribute.Key("authz.action")
-	AttrAllowed     = attribute.Key("authz.allowed")
-	AttrCacheHit    = attribute.Key("cache.hit")
-	AttrDBTable     = attribute.Key("db.table")
-	AttrDBOperation = attribute.Key("db.operation")
-)

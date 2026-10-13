@@ -1,14 +1,12 @@
-// Package postgres provides PostgreSQL-based repository implementations.
-//
-// This package implements all repository interfaces defined in port package
-// using GORM as the ORM layer.
 package postgres
 
 import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
 	"github.com/andrewhigh08/iam-service/internal/domain"
@@ -16,189 +14,171 @@ import (
 	"github.com/andrewhigh08/iam-service/internal/port"
 )
 
-// UserRepository implements port.UserRepository using PostgreSQL.
-//
-// Provides CRUD operations for user entities with support for
-// soft delete and transactional operations.
+const (
+	resourceUser = "user"
+
+	// Values of port.UserFilter.Status that narrow a listing.
+	statusActive  = "active"
+	statusBlocked = "blocked"
+
+	// uniqueViolation is the PostgreSQL SQLSTATE of a unique constraint violation.
+	uniqueViolation = "23505"
+
+	// defaultPageSize applies when a listing is requested without a positive page size.
+	defaultPageSize = 20
+)
+
+// likeEscaper makes the LIKE wildcard characters of a search term match literally.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// UserRepository implements port.UserRepository on PostgreSQL.
 type UserRepository struct {
-	db *gorm.DB // Database connection
+	repo
 }
 
-// NewUserRepository creates a new UserRepository instance.
+// NewUserRepository returns a UserRepository backed by db.
 func NewUserRepository(db *gorm.DB) *UserRepository {
-	return &UserRepository{db: db}
+	return &UserRepository{repo: repo{db: db}}
 }
 
-// Create creates a new user in the database.
+// Create inserts user, filling its generated ID and timestamps.
+// A taken email yields apperror.Conflict.
 func (r *UserRepository) Create(ctx context.Context, user *domain.User) error {
-	return r.CreateTx(ctx, r.db, user)
-}
-
-// CreateTx creates a new user within an existing transaction.
-// Use this when creating a user as part of a larger transactional operation.
-func (r *UserRepository) CreateTx(ctx context.Context, tx *gorm.DB, user *domain.User) error {
-	if err := tx.WithContext(ctx).Create(user).Error; err != nil {
-		if errors.Is(err, gorm.ErrDuplicatedKey) || isDuplicateKeyError(err) {
-			return apperror.Conflict("user", "email", user.Email)
+	if err := r.conn(ctx).Create(user).Error; err != nil {
+		if isUniqueViolation(err) {
+			return apperror.Conflict(resourceUser, "email", user.Email)
 		}
 		return apperror.Internal("failed to create user", err)
 	}
 	return nil
 }
 
-// FindByID retrieves a user by their unique identifier.
-// Excludes soft-deleted users.
+// FindByID returns the user with the given id or apperror.NotFound.
 func (r *UserRepository) FindByID(ctx context.Context, id int64) (*domain.User, error) {
-	var user domain.User
-	err := r.db.WithContext(ctx).
-		Where("id = ? AND deleted_at IS NULL", id).
-		First(&user).Error
-
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, apperror.NotFound("user", id)
-		}
-		return nil, apperror.Internal("failed to find user", err)
-	}
-	return &user, nil
+	return r.findOne(ctx, "id = ?", id)
 }
 
-// FindByEmail retrieves a user by their email address.
-// Excludes soft-deleted users.
+// FindByEmail returns the user with the given email or apperror.NotFound.
 func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*domain.User, error) {
-	var user domain.User
-	err := r.db.WithContext(ctx).
-		Where("email = ? AND deleted_at IS NULL", email).
-		First(&user).Error
+	return r.findOne(ctx, "email = ?", email)
+}
 
-	if err != nil {
+// findOne loads the single user matching the condition, reporting value as the missing id.
+func (r *UserRepository) findOne(ctx context.Context, cond string, value any) (*domain.User, error) {
+	var user domain.User
+	if err := r.conn(ctx).Where(cond, value).First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, apperror.NotFound("user", email)
+			return nil, apperror.NotFound(resourceUser, value)
 		}
 		return nil, apperror.Internal("failed to find user", err)
 	}
 	return &user, nil
 }
 
-// Update updates an existing user in the database.
-func (r *UserRepository) Update(ctx context.Context, user *domain.User) error {
-	return r.UpdateTx(ctx, r.db, user)
+// UpdatePassword replaces the password columns of the user id and refreshes updated_at.
+// Returns apperror.NotFound when no row matched.
+func (r *UserRepository) UpdatePassword(ctx context.Context, id int64, hash string, temporary bool, changedAt time.Time) error {
+	return r.updateColumns(ctx, id, map[string]any{
+		"password_hash":       hash,
+		"password_temporary":  temporary,
+		"password_changed_at": changedAt,
+	})
 }
 
-// UpdateTx updates an existing user within an existing transaction.
-func (r *UserRepository) UpdateTx(ctx context.Context, tx *gorm.DB, user *domain.User) error {
-	result := tx.WithContext(ctx).Save(user)
-	if result.Error != nil {
-		return apperror.Internal("failed to update user", result.Error)
-	}
-	if result.RowsAffected == 0 {
-		return apperror.NotFound("user", user.ID)
-	}
-	return nil
+// SetBlocked writes the blocked flag of the user id and refreshes updated_at.
+// Returns apperror.NotFound when no row matched.
+func (r *UserRepository) SetBlocked(ctx context.Context, id int64, blocked bool) error {
+	return r.updateColumns(ctx, id, map[string]any{"is_blocked": blocked})
 }
 
-// Delete performs a soft-delete on a user.
-// The user record is not physically removed from the database.
-func (r *UserRepository) Delete(ctx context.Context, id int64) error {
-	return r.DeleteTx(ctx, r.db, id)
-}
-
-// DeleteTx performs a soft-delete within an existing transaction.
-func (r *UserRepository) DeleteTx(ctx context.Context, tx *gorm.DB, id int64) error {
-	result := tx.WithContext(ctx).
-		Where("id = ? AND deleted_at IS NULL", id).
-		Delete(&domain.User{})
-
-	if result.Error != nil {
-		return apperror.Internal("failed to delete user", result.Error)
+// updateColumns writes columns plus updated_at to the row of the user id; the explicit column
+// map keeps every other column untouched, so concurrent writers never overwrite each other.
+func (r *UserRepository) updateColumns(ctx context.Context, id int64, columns map[string]any) error {
+	columns["updated_at"] = r.db.NowFunc()
+	res := r.conn(ctx).Model(&domain.User{}).Where("id = ?", id).Updates(columns)
+	if res.Error != nil {
+		return apperror.Internal("failed to update user", res.Error)
 	}
-	if result.RowsAffected == 0 {
-		return apperror.NotFound("user", id)
+	if res.RowsAffected == 0 {
+		return apperror.NotFound(resourceUser, id)
 	}
 	return nil
 }
 
-// HardDelete permanently removes a user from the database.
-// Used for compensating transactions in saga pattern.
+// HardDelete physically removes the user with the given id. A missing user is not an error.
 func (r *UserRepository) HardDelete(ctx context.Context, id int64) error {
-	result := r.db.WithContext(ctx).Unscoped().Delete(&domain.User{}, id)
-	if result.Error != nil {
-		return apperror.Internal("failed to hard delete user", result.Error)
+	if err := r.conn(ctx).Where("id = ?", id).Delete(&domain.User{}).Error; err != nil {
+		return apperror.Internal("failed to delete user", err)
 	}
 	return nil
 }
 
-// List retrieves users with filtering and pagination.
-// Returns: users slice, total count, error.
-func (r *UserRepository) List(ctx context.Context, filter port.UserFilter) ([]domain.User, int64, error) {
-	var users []domain.User
+// List returns one page of the users matching f, newest first, with the total match count.
+func (r *UserRepository) List(ctx context.Context, f port.UserFilter) ([]domain.User, int64, error) {
 	var total int64
-
-	query := r.db.WithContext(ctx).Model(&domain.User{}).Where("deleted_at IS NULL")
-
-	// Apply status filter
-	switch filter.Status {
-	case "active":
-		query = query.Where("is_blocked = ?", false)
-	case "blocked":
-		query = query.Where("is_blocked = ?", true)
-	}
-
-	// Apply search filter (email or full name)
-	if filter.Search != "" {
-		search := "%" + filter.Search + "%"
-		query = query.Where("email ILIKE ? OR full_name ILIKE ?", search, search)
-	}
-
-	// Count total matching records
-	if err := query.Count(&total).Error; err != nil {
+	if err := r.filtered(ctx, f).Count(&total).Error; err != nil {
 		return nil, 0, apperror.Internal("failed to count users", err)
 	}
-
-	// Calculate offset for pagination
-	offset := (filter.Page - 1) * filter.PageSize
-	if offset < 0 {
-		offset = 0
+	users := []domain.User{}
+	if total == 0 {
+		return users, 0, nil
 	}
 
-	// Get paginated results
-	err := query.
-		Order("created_at DESC").
-		Limit(filter.PageSize).
-		Offset(offset).
+	page, size := normalizePage(f.Page, f.PageSize)
+	err := r.filtered(ctx, f).
+		Order("created_at DESC, id DESC").
+		Limit(size).
+		Offset((page - 1) * size).
 		Find(&users).Error
-
 	if err != nil {
 		return nil, 0, apperror.Internal("failed to list users", err)
 	}
-
 	return users, total, nil
 }
 
-// ExistsByEmail checks if a user with the given email already exists.
-// Excludes soft-deleted users.
+// ExistsByEmail reports whether a user with the given email exists.
 func (r *UserRepository) ExistsByEmail(ctx context.Context, email string) (bool, error) {
 	var count int64
-	err := r.db.WithContext(ctx).
-		Model(&domain.User{}).
-		Where("email = ? AND deleted_at IS NULL", email).
-		Count(&count).Error
-
+	err := r.conn(ctx).Model(&domain.User{}).Where("email = ?", email).Count(&count).Error
 	if err != nil {
 		return false, apperror.Internal("failed to check email existence", err)
 	}
 	return count > 0, nil
 }
 
-// isDuplicateKeyError checks if the error is a PostgreSQL duplicate key violation.
-// PostgreSQL error code 23505 indicates unique_violation.
-func isDuplicateKeyError(err error) bool {
-	if err == nil {
-		return false
+// filtered returns a users query narrowed by the status and search term of f.
+func (r *UserRepository) filtered(ctx context.Context, f port.UserFilter) *gorm.DB {
+	q := r.conn(ctx).Model(&domain.User{})
+	switch f.Status {
+	case statusActive:
+		q = q.Where("is_blocked = ?", false)
+	case statusBlocked:
+		q = q.Where("is_blocked = ?", true)
 	}
+	if search := strings.TrimSpace(f.Search); search != "" {
+		pattern := "%" + likeEscaper.Replace(search) + "%"
+		q = q.Where("email ILIKE ? OR full_name ILIKE ?", pattern, pattern)
+	}
+	return q
+}
+
+// normalizePage returns a 1-based page and a positive page size.
+func normalizePage(page, size int) (int, int) {
+	if page < 1 {
+		page = 1
+	}
+	if size < 1 {
+		size = defaultPageSize
+	}
+	return page, size
+}
+
+// isUniqueViolation reports whether err is a unique constraint violation, either translated
+// by GORM or reported by the PostgreSQL driver.
+func isUniqueViolation(err error) bool {
 	if errors.Is(err, gorm.ErrDuplicatedKey) {
 		return true
 	}
-	errMsg := err.Error()
-	return errMsg != "" && (strings.Contains(errMsg, "duplicate key") || strings.Contains(errMsg, "23505"))
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation
 }

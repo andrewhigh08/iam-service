@@ -1,12 +1,56 @@
+basePath: /
 definitions:
+  handler.AuditEntriesResponse:
+    properties:
+      entries:
+        items:
+          $ref: '#/definitions/handler.AuditEntryResponse'
+        type: array
+      total:
+        type: integer
+    type: object
+  handler.AuditEntryResponse:
+    properties:
+      action:
+        type: string
+      actor_id:
+        type: integer
+      created_at:
+        type: string
+      details:
+        additionalProperties: {}
+        type: object
+      id:
+        type: integer
+      ip:
+        type: string
+      resource_id:
+        type: string
+      resource_type:
+        type: string
+      user_agent:
+        type: string
+    type: object
   handler.ChangePasswordRequest:
     properties:
       new_password:
-        minLength: 8
         type: string
       old_password:
         type: string
     required:
+    - new_password
+    - old_password
+    type: object
+  handler.ChangeRequiredPasswordRequest:
+    properties:
+      email:
+        type: string
+      new_password:
+        type: string
+      old_password:
+        type: string
+    required:
+    - email
     - new_password
     - old_password
     type: object
@@ -24,13 +68,9 @@ definitions:
       full_name:
         type: string
       password:
-        minLength: 8
         type: string
-      password_type:
-        enum:
-        - permanent
-        - onetime
-        type: string
+      password_temporary:
+        type: boolean
       role:
         enum:
         - admin
@@ -54,50 +94,19 @@ definitions:
       id:
         type: integer
     type: object
-  handler.FirstTimePasswordChangeRequest:
-    properties:
-      new_password:
-        minLength: 8
-        type: string
-      old_password:
-        type: string
-      user_id:
-        type: integer
-    required:
-    - new_password
-    - old_password
-    - user_id
-    type: object
-  handler.FirstTimePasswordChangeResponse:
-    properties:
-      access_token:
-        type: string
-      message:
-        type: string
-      roles:
-        items:
-          type: string
-        type: array
-      token_type:
-        type: string
-    type: object
-  handler.HealthStatus:
-    properties:
-      checks:
-        additionalProperties:
-          $ref: '#/definitions/handler.Check'
-        type: object
-      status:
-        type: string
-      timestamp:
-        type: string
-    type: object
   handler.ListUsersResponse:
     properties:
       users:
         items:
           $ref: '#/definitions/handler.UserResponse'
         type: array
+    type: object
+  handler.LiveResponse:
+    properties:
+      status:
+        type: string
+      version:
+        type: string
     type: object
   handler.LoginRequest:
     properties:
@@ -113,17 +122,83 @@ definitions:
     properties:
       access_token:
         type: string
-      message:
+      expires_in:
+        type: integer
+      reason:
+        type: string
+      refresh_token:
         type: string
       require_password_change:
-        description: For OTP flow
         type: boolean
       token_type:
         type: string
       user:
         $ref: '#/definitions/handler.UserInfo'
-      user_id:
+    type: object
+  handler.LogoutRequest:
+    properties:
+      access_token:
+        type: string
+      refresh_token:
+        type: string
+    required:
+    - refresh_token
+    type: object
+  handler.MessageResponse:
+    properties:
+      message:
+        type: string
+    type: object
+  handler.ReadyResponse:
+    properties:
+      checks:
+        additionalProperties:
+          $ref: '#/definitions/handler.Check'
+        type: object
+      status:
+        type: string
+    type: object
+  handler.RefreshRequest:
+    properties:
+      refresh_token:
+        type: string
+    required:
+    - refresh_token
+    type: object
+  handler.SessionResponse:
+    properties:
+      created_at:
+        type: string
+      current:
+        type: boolean
+      expires_at:
+        type: string
+      id:
+        type: string
+      ip:
+        type: string
+      user_agent:
+        type: string
+    type: object
+  handler.SessionsResponse:
+    properties:
+      sessions:
+        items:
+          $ref: '#/definitions/handler.SessionResponse'
+        type: array
+      total:
         type: integer
+    type: object
+  handler.TokenPairResponse:
+    properties:
+      access_token:
+        type: string
+      expires_in:
+        type: integer
+      refresh_token:
+        type: string
+      token_type:
+        type: string
     type: object
   handler.UserInfo:
     properties:
@@ -164,7 +239,7 @@ definitions:
       code:
         type: string
       details:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       message:
         type: string
@@ -180,16 +255,48 @@ definitions:
       total_pages:
         type: integer
     type: object
+host: localhost:8080
 info:
-  contact: {}
+  contact:
+    name: API Support
+    url: https://github.com/andrewhigh08/iam-service
+  description: 'Identity and Access Management service: login with RS256 access tokens
+    and rotating refresh tokens, session management, role-based authorization and
+    user administration. Every JSON endpoint except the JWKS and health probes answers
+    with the {success, data, error, meta} envelope.'
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  title: IAM Service API
+  version: "1.0"
 paths:
+  /.well-known/jwks.json:
+    get:
+      description: Returns the JSON Web Key Set (RFC 7517) needed to verify access
+        tokens.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      summary: Public signing keys
+      tags:
+      - auth
   /api/v1/change-password:
     post:
       consumes:
       - application/json
-      description: Change password for authenticated user
+      description: Replaces the caller's password, ends every other session and returns
+        a fresh token pair. The new password must satisfy the password policy.
       parameters:
-      - description: Password change data
+      - description: Current and new password
         in: body
         name: request
         required: true
@@ -201,7 +308,12 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/response.APIResponse'
+            allOf:
+            - $ref: '#/definitions/response.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/handler.TokenPairResponse'
+              type: object
         "400":
           description: Bad Request
           schema:
@@ -215,28 +327,112 @@ paths:
       summary: Change password
       tags:
       - auth
+  /api/v1/logout-all:
+    post:
+      description: Ends every session of the caller and revokes all access tokens
+        issued so far.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/handler.MessageResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Log out everywhere
+      tags:
+      - auth
+  /api/v1/sessions:
+    get:
+      description: Lists the live sessions of the caller; the one serving this request
+        is marked current.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/handler.SessionsResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: List sessions
+      tags:
+      - auth
+  /api/v1/sessions/{id}:
+    delete:
+      description: Ends one session of the caller by its id and revokes the access
+        token issued with it.
+      parameters:
+      - description: Session id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/handler.MessageResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Revoke a session
+      tags:
+      - auth
   /api/v1/users:
     get:
-      consumes:
-      - application/json
-      description: Get paginated list of users with optional filtering
+      description: Lists users page by page, optionally filtered by status and a search
+        over email and name.
       parameters:
       - default: all
-        description: 'Filter by status: active, blocked, all'
+        description: all, active or blocked
         in: query
         name: status
         type: string
-      - description: Search by email or name
+      - description: Substring of the email or full name
         in: query
         name: search
         type: string
       - default: 1
-        description: Page number
+        description: Page number, from 1
         in: query
         name: page
         type: integer
       - default: 10
-        description: Items per page (max 100)
+        description: Users per page, 1 to 100
         in: query
         name: page_size
         type: integer
@@ -254,6 +450,10 @@ paths:
                 meta:
                   $ref: '#/definitions/response.Meta'
               type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.APIResponse'
         "401":
           description: Unauthorized
           schema:
@@ -270,9 +470,10 @@ paths:
     post:
       consumes:
       - application/json
-      description: Create a new user with specified role
+      description: Creates a user with the given role. The password must satisfy the
+        password policy.
       parameters:
-      - description: User data
+      - description: New user
         in: body
         name: request
         required: true
@@ -308,16 +509,13 @@ paths:
             $ref: '#/definitions/response.APIResponse'
       security:
       - BearerAuth: []
-      summary: Create user
+      summary: Create a user
       tags:
       - users
   /api/v1/users/{id}:
     get:
-      consumes:
-      - application/json
-      description: Get user details by ID
       parameters:
-      - description: User ID
+      - description: User id
         in: path
         name: id
         required: true
@@ -352,99 +550,24 @@ paths:
             $ref: '#/definitions/response.APIResponse'
       security:
       - BearerAuth: []
-      summary: Get user
+      summary: Get a user
       tags:
       - users
-  /api/v1/users/{id}/block:
-    post:
-      consumes:
-      - application/json
-      description: Block a user account
+  /api/v1/users/{id}/audit:
+    get:
+      description: Lists the most recent audit entries recorded for actions of the
+        user, newest first. An id without entries yields an empty list.
       parameters:
-      - description: User ID
+      - description: User id
         in: path
         name: id
         required: true
         type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/response.APIResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/response.APIResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/response.APIResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/response.APIResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/response.APIResponse'
-      security:
-      - BearerAuth: []
-      summary: Block user
-      tags:
-      - users
-  /api/v1/users/{id}/unblock:
-    post:
-      consumes:
-      - application/json
-      description: Unblock a user account
-      parameters:
-      - description: User ID
-        in: path
-        name: id
-        required: true
+      - default: 50
+        description: Entries to return, 1 to 100
+        in: query
+        name: limit
         type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/response.APIResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/response.APIResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/response.APIResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/response.APIResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/response.APIResponse'
-      security:
-      - BearerAuth: []
-      summary: Unblock user
-      tags:
-      - users
-  /auth/first-time-password-change:
-    post:
-      consumes:
-      - application/json
-      description: Change one-time password to permanent password
-      parameters:
-      - description: Password change data
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/handler.FirstTimePasswordChangeRequest'
       produces:
       - application/json
       responses:
@@ -455,22 +578,157 @@ paths:
             - $ref: '#/definitions/response.APIResponse'
             - properties:
                 data:
-                  $ref: '#/definitions/handler.FirstTimePasswordChangeResponse'
+                  $ref: '#/definitions/handler.AuditEntriesResponse'
               type: object
         "400":
           description: Bad Request
           schema:
             $ref: '#/definitions/response.APIResponse'
-      summary: First-time password change
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: List a user's audit trail
+      tags:
+      - audit
+  /api/v1/users/{id}/block:
+    post:
+      description: Blocks the account and ends all of its sessions and tokens.
+      parameters:
+      - description: User id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/handler.MessageResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Block a user
+      tags:
+      - users
+  /api/v1/users/{id}/unblock:
+    post:
+      parameters:
+      - description: User id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/handler.MessageResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Unblock a user
+      tags:
+      - users
+  /auth/change-password:
+    post:
+      consumes:
+      - application/json
+      description: Completes a login that required a password change. Only allowed
+        while the password is temporary or expired; rate limited like login.
+      parameters:
+      - description: Email, current and new password
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.ChangeRequiredPasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/handler.TokenPairResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      summary: Change a temporary or expired password
       tags:
       - auth
   /auth/login:
     post:
       consumes:
       - application/json
-      description: Authenticate user and get JWT token
+      description: Checks the credentials and issues a token pair. When the password
+        is temporary or expired the response carries require_password_change=true
+        and a reason instead of tokens.
       parameters:
-      - description: Login credentials
+      - description: Credentials
         in: body
         name: request
         required: true
@@ -496,50 +754,119 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/response.APIResponse'
-      summary: User login
-      tags:
-      - auth
-  /health:
-    get:
-      description: Basic health check
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
+        "429":
+          description: Too Many Requests
           schema:
             $ref: '#/definitions/response.APIResponse'
-      summary: Health check
+      summary: Log in
       tags:
-      - health
-  /health/live:
-    get:
-      description: Check if the service is alive
+      - auth
+  /auth/logout:
+    post:
+      consumes:
+      - application/json
+      description: Ends the session of the refresh token and revokes the access token
+        given in the body or in the Authorization header.
+      parameters:
+      - description: Tokens to invalidate
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.LogoutRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handler.HealthStatus'
+            allOf:
+            - $ref: '#/definitions/response.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/handler.MessageResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      summary: Log out
+      tags:
+      - auth
+  /auth/refresh:
+    post:
+      consumes:
+      - application/json
+      description: Rotates the refresh token and issues a new token pair. The previous
+        refresh token stops working.
+      parameters:
+      - description: Refresh token
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.RefreshRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/handler.TokenPairResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      summary: Refresh tokens
+      tags:
+      - auth
+  /health/live:
+    get:
+      description: Reports that the process is running and which version it is.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.LiveResponse'
       summary: Liveness probe
       tags:
       - health
   /health/ready:
     get:
-      description: Check if the service is ready to accept requests
+      description: Pings the database and Redis; answers 503 with status "degraded"
+        when either is unreachable.
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handler.HealthStatus'
+            $ref: '#/definitions/handler.ReadyResponse'
         "503":
           description: Service Unavailable
           schema:
-            $ref: '#/definitions/handler.HealthStatus'
+            $ref: '#/definitions/handler.ReadyResponse'
       summary: Readiness probe
       tags:
       - health
+schemes:
+- http
+- https
+securityDefinitions:
+  BearerAuth:
+    description: Type "Bearer" followed by a space and the access token.
+    in: header
+    name: Authorization
+    type: apiKey
 swagger: "2.0"

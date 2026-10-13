@@ -1,530 +1,121 @@
-// Package validator provides custom validation functions and utilities.
+// Package validator enforces the password policy.
 package validator
 
 import (
-	"errors"
-	"regexp"
+	"fmt"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
-	"github.com/go-playground/validator/v10"
+	"github.com/andrewhigh08/iam-service/internal/pkg/apperror"
 )
 
-var (
-	// emailDomainRegex validates email domain format.
-	emailDomainRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
-)
+// MaxPasswordBytes is the longest password bcrypt hashes in full; longer input is silently truncated.
+const MaxPasswordBytes = 72
 
-// CustomValidator wraps the standard validator with custom validations.
-type CustomValidator struct {
-	validate *validator.Validate
+// Policy lists the rules a password must satisfy. Lengths count Unicode characters.
+type Policy struct {
+	MinLength      int
+	MaxLength      int
+	RequireUpper   bool
+	RequireLower   bool
+	RequireDigit   bool
+	RequireSpecial bool
+	ForbidCommon   bool
 }
 
-// New creates a new CustomValidator with all custom validations registered.
-func New() (*CustomValidator, error) {
-	v := validator.New()
-
-	// Register custom validations
-	if err := v.RegisterValidation("strongpassword", validateStrongPassword); err != nil {
-		return nil, err
+// DefaultPolicy returns the policy applied by the service: 8 to 128 characters with upper and
+// lower case letters, a digit and a special character, and not a well-known password.
+func DefaultPolicy() Policy {
+	return Policy{
+		MinLength:      8,
+		MaxLength:      128,
+		RequireUpper:   true,
+		RequireLower:   true,
+		RequireDigit:   true,
+		RequireSpecial: true,
+		ForbidCommon:   true,
 	}
-
-	if err := v.RegisterValidation("safeemail", validateSafeEmail); err != nil {
-		return nil, err
-	}
-
-	if err := v.RegisterValidation("alphanumspace", validateAlphanumericWithSpaces); err != nil {
-		return nil, err
-	}
-
-	if err := v.RegisterValidation("nohtml", validateNoHTML); err != nil {
-		return nil, err
-	}
-
-	return &CustomValidator{validate: v}, nil
 }
 
-// Validate validates a struct using the registered validations.
-func (cv *CustomValidator) Validate(i any) error {
-	return cv.validate.Struct(i)
+// ValidatePassword checks pw against p. It returns nil when the password is acceptable, otherwise
+// an *apperror.AppError with code VALIDATION_ERROR whose Details["errors"] lists every violated rule.
+func ValidatePassword(pw string, p Policy) error {
+	violations := lengthViolations(pw, p)
+	violations = append(violations, classViolations(pw, p)...)
+	if p.ForbidCommon && isCommon(pw) {
+		violations = append(violations, "password is too common")
+	}
+	if len(violations) == 0 {
+		return nil
+	}
+	return apperror.ValidationError("password does not meet the policy", map[string]any{"errors": violations})
 }
 
-// validateStrongPassword ensures password meets complexity requirements.
-// Requirements: 8+ chars, uppercase, lowercase, digit, special character.
-func validateStrongPassword(fl validator.FieldLevel) bool {
-	password := fl.Field().String()
-
-	if len(password) < 8 {
-		return false
+// lengthViolations checks the character limits of p and the bcrypt byte limit.
+func lengthViolations(pw string, p Policy) []string {
+	var out []string
+	runes := utf8.RuneCountInString(pw)
+	if runes < p.MinLength {
+		out = append(out, fmt.Sprintf("password must be at least %d characters long", p.MinLength))
 	}
+	if p.MaxLength > 0 && runes > p.MaxLength {
+		out = append(out, fmt.Sprintf("password must be at most %d characters long", p.MaxLength))
+	}
+	if len(pw) > MaxPasswordBytes {
+		out = append(out, fmt.Sprintf("password must not exceed %d bytes in UTF-8; non-ASCII characters take several bytes each", MaxPasswordBytes))
+	}
+	return out
+}
 
-	var (
-		hasUpper   bool
-		hasLower   bool
-		hasDigit   bool
-		hasSpecial bool
-	)
-
-	for _, char := range password {
+// classViolations checks the character classes required by p.
+func classViolations(pw string, p Policy) []string {
+	var upper, lower, digit, special bool
+	for _, r := range pw {
 		switch {
-		case unicode.IsUpper(char):
-			hasUpper = true
-		case unicode.IsLower(char):
-			hasLower = true
-		case unicode.IsDigit(char):
-			hasDigit = true
-		case unicode.IsPunct(char) || unicode.IsSymbol(char):
-			hasSpecial = true
+		case unicode.IsUpper(r):
+			upper = true
+		case unicode.IsLower(r):
+			lower = true
+		case unicode.IsDigit(r):
+			digit = true
+		case unicode.IsPunct(r) || unicode.IsSymbol(r):
+			special = true
 		}
 	}
 
-	return hasUpper && hasLower && hasDigit && hasSpecial
+	var out []string
+	if p.RequireUpper && !upper {
+		out = append(out, "password must contain an uppercase letter")
+	}
+	if p.RequireLower && !lower {
+		out = append(out, "password must contain a lowercase letter")
+	}
+	if p.RequireDigit && !digit {
+		out = append(out, "password must contain a digit")
+	}
+	if p.RequireSpecial && !special {
+		out = append(out, "password must contain a special character")
+	}
+	return out
 }
 
-// validateSafeEmail validates email format and checks for common attack patterns.
-func validateSafeEmail(fl validator.FieldLevel) bool {
-	email := fl.Field().String()
-
-	// Basic format check
-	if !emailDomainRegex.MatchString(email) {
-		return false
-	}
-
-	// Check for common injection patterns
-	dangerousPatterns := []string{
-		"<script",
-		"javascript:",
-		"data:",
-		"\n",
-		"\r",
-		"%0a",
-		"%0d",
-	}
-
-	emailLower := strings.ToLower(email)
-	for _, pattern := range dangerousPatterns {
-		if strings.Contains(emailLower, pattern) {
-			return false
-		}
-	}
-
-	return true
+// isCommon reports whether pw, compared case-insensitively, is a well-known password.
+func isCommon(pw string) bool {
+	_, ok := commonPasswords[strings.ToLower(pw)]
+	return ok
 }
 
-// validateAlphanumericWithSpaces allows only alphanumeric characters and spaces.
-func validateAlphanumericWithSpaces(fl validator.FieldLevel) bool {
-	value := fl.Field().String()
-
-	for _, char := range value {
-		if !unicode.IsLetter(char) && !unicode.IsDigit(char) && !unicode.IsSpace(char) {
-			return false
-		}
-	}
-
-	return true
-}
-
-// validateNoHTML ensures the field contains no HTML tags.
-func validateNoHTML(fl validator.FieldLevel) bool {
-	value := fl.Field().String()
-	htmlTagPattern := regexp.MustCompile(`<[^>]*>`)
-	return !htmlTagPattern.MatchString(value)
-}
-
-// ValidationErrors represents a map of field names to error messages.
-type ValidationErrors map[string]string
-
-// FormatValidationErrors converts validator.ValidationErrors to a user-friendly format.
-func FormatValidationErrors(err error) ValidationErrors {
-	result := make(ValidationErrors)
-
-	var validationErrors validator.ValidationErrors
-	if errors.As(err, &validationErrors) {
-		for _, e := range validationErrors {
-			field := strings.ToLower(e.Field())
-			result[field] = formatErrorMessage(e)
-		}
-	}
-
-	return result
-}
-
-// formatErrorMessage returns a user-friendly error message for a validation error.
-func formatErrorMessage(e validator.FieldError) string {
-	switch e.Tag() {
-	case "required":
-		return "This field is required"
-	case "email":
-		return "Must be a valid email address"
-	case "min":
-		return "Must be at least " + e.Param() + " characters"
-	case "max":
-		return "Must be at most " + e.Param() + " characters"
-	case "strongpassword":
-		return "Must be at least 8 characters with uppercase, lowercase, digit, and special character"
-	case "safeemail":
-		return "Invalid email format"
-	case "alphanumspace":
-		return "Must contain only letters, numbers, and spaces"
-	case "nohtml":
-		return "HTML tags are not allowed"
-	case "oneof":
-		return "Must be one of: " + e.Param()
-	default:
-		return "Invalid value"
-	}
-}
-
-// PasswordStrength represents the strength of a password.
-type PasswordStrength int
-
-// Password strength levels.
-const (
-	PasswordWeak   PasswordStrength = iota // Weak password
-	PasswordFair                           // Fair password
-	PasswordGood                           // Good password
-	PasswordStrong                         // Strong password
-)
-
-// CheckPasswordStrength evaluates the strength of a password.
-func CheckPasswordStrength(password string) PasswordStrength {
-	score := calculateLengthScore(len(password)) + calculateCharVarietyScore(password)
-	return scoreToStrength(score)
-}
-
-// calculateLengthScore returns score based on password length.
-func calculateLengthScore(length int) int {
-	score := 0
-	for _, threshold := range []int{8, 12, 16} {
-		if length >= threshold {
-			score++
-		}
-	}
-	return score
-}
-
-// calculateCharVarietyScore returns score based on character variety.
-func calculateCharVarietyScore(password string) int {
-	var hasUpper, hasLower, hasDigit, hasSpecial bool
-	for _, char := range password {
-		switch {
-		case unicode.IsUpper(char):
-			hasUpper = true
-		case unicode.IsLower(char):
-			hasLower = true
-		case unicode.IsDigit(char):
-			hasDigit = true
-		case unicode.IsPunct(char) || unicode.IsSymbol(char):
-			hasSpecial = true
-		}
-	}
-	return boolToInt(hasUpper) + boolToInt(hasLower) + boolToInt(hasDigit) + boolToInt(hasSpecial)
-}
-
-// boolToInt converts boolean to integer (1 for true, 0 for false).
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-
-// scoreToStrength converts numeric score to PasswordStrength.
-func scoreToStrength(score int) PasswordStrength {
-	switch {
-	case score >= 6:
-		return PasswordStrong
-	case score >= 4:
-		return PasswordGood
-	case score >= 2:
-		return PasswordFair
-	default:
-		return PasswordWeak
-	}
-}
-
-// String returns a string representation of password strength.
-func (ps PasswordStrength) String() string {
-	switch ps {
-	case PasswordStrong:
-		return "strong"
-	case PasswordGood:
-		return "good"
-	case PasswordFair:
-		return "fair"
-	case PasswordWeak:
-		return "weak"
-	default:
-		return "weak"
-	}
-}
-
-// PasswordRequirements defines configurable password complexity requirements.
-type PasswordRequirements struct {
-	MinLength        int  // Minimum password length
-	MaxLength        int  // Maximum password length
-	RequireUppercase bool // Require at least one uppercase letter
-	RequireLowercase bool // Require at least one lowercase letter
-	RequireDigit     bool // Require at least one digit
-	RequireSpecial   bool // Require at least one special character
-	DisallowCommon   bool // Disallow common passwords
-	DisallowSequence bool // Disallow sequential characters
-}
-
-// DefaultPasswordRequirements returns the default password requirements.
-func DefaultPasswordRequirements() PasswordRequirements {
-	return PasswordRequirements{
-		MinLength:        8,
-		MaxLength:        128,
-		RequireUppercase: true,
-		RequireLowercase: true,
-		RequireDigit:     true,
-		RequireSpecial:   true,
-		DisallowCommon:   true,
-		DisallowSequence: true,
-	}
-}
-
-// PasswordValidationResult contains the result of password validation.
-type PasswordValidationResult struct {
-	Valid    bool     // Whether the password is valid
-	Errors   []string // List of validation errors
-	Strength PasswordStrength
-}
-
-// charTypeAnalysis holds the result of character type analysis.
-type charTypeAnalysis struct {
-	hasUpper   bool
-	hasLower   bool
-	hasDigit   bool
-	hasSpecial bool
-}
-
-// analyzeCharTypes analyzes character types in a password.
-func analyzeCharTypes(password string) charTypeAnalysis {
-	var result charTypeAnalysis
-	for _, char := range password {
-		switch {
-		case unicode.IsUpper(char):
-			result.hasUpper = true
-		case unicode.IsLower(char):
-			result.hasLower = true
-		case unicode.IsDigit(char):
-			result.hasDigit = true
-		case unicode.IsPunct(char) || unicode.IsSymbol(char):
-			result.hasSpecial = true
-		}
-	}
-	return result
-}
-
-// validateLength checks password length requirements.
-func validateLength(password string, req PasswordRequirements) []string {
-	var errors []string
-	if len(password) < req.MinLength {
-		errors = append(errors, "Password must be at least "+itoa(req.MinLength)+" characters long")
-	}
-	if req.MaxLength > 0 && len(password) > req.MaxLength {
-		errors = append(errors, "Password must be at most "+itoa(req.MaxLength)+" characters long")
-	}
-	return errors
-}
-
-// validateCharTypes checks required character types.
-func validateCharTypes(analysis charTypeAnalysis, req PasswordRequirements) []string {
-	var errors []string
-	if req.RequireUppercase && !analysis.hasUpper {
-		errors = append(errors, "Password must contain at least one uppercase letter")
-	}
-	if req.RequireLowercase && !analysis.hasLower {
-		errors = append(errors, "Password must contain at least one lowercase letter")
-	}
-	if req.RequireDigit && !analysis.hasDigit {
-		errors = append(errors, "Password must contain at least one digit")
-	}
-	if req.RequireSpecial && !analysis.hasSpecial {
-		errors = append(errors, "Password must contain at least one special character (!@#$%^&*...)")
-	}
-	return errors
-}
-
-// validatePatterns checks for common passwords and bad patterns.
-func validatePatterns(password string, req PasswordRequirements) []string {
-	var errors []string
-	if req.DisallowCommon && isCommonPassword(password) {
-		errors = append(errors, "Password is too common, please choose a more unique password")
-	}
-	if req.DisallowSequence && hasSequentialChars(password, 4) {
-		errors = append(errors, "Password contains sequential characters (e.g., 1234, abcd)")
-	}
-	if hasRepeatedChars(password, 4) {
-		errors = append(errors, "Password contains too many repeated characters")
-	}
-	return errors
-}
-
-// ValidatePassword validates a password against the given requirements.
-func ValidatePassword(password string, req PasswordRequirements) PasswordValidationResult {
-	result := PasswordValidationResult{
-		Valid:    true,
-		Errors:   []string{},
-		Strength: CheckPasswordStrength(password),
-	}
-
-	// Validate length
-	result.Errors = append(result.Errors, validateLength(password, req)...)
-
-	// Validate character types
-	analysis := analyzeCharTypes(password)
-	result.Errors = append(result.Errors, validateCharTypes(analysis, req)...)
-
-	// Validate patterns
-	result.Errors = append(result.Errors, validatePatterns(password, req)...)
-
-	// Set valid to false if there are any errors
-	result.Valid = len(result.Errors) == 0
-
-	return result
-}
-
-// ValidatePasswordDefault validates password with default requirements.
-func ValidatePasswordDefault(password string) PasswordValidationResult {
-	return ValidatePassword(password, DefaultPasswordRequirements())
-}
-
-// isCommonPassword checks if password is in the list of common passwords.
-func isCommonPassword(password string) bool {
-	commonPasswords := map[string]bool{
-		"password":    true,
-		"password1":   true,
-		"password123": true,
-		"123456":      true,
-		"12345678":    true,
-		"123456789":   true,
-		"1234567890":  true,
-		"qwerty":      true,
-		"qwerty123":   true,
-		"qwertyuiop":  true,
-		"letmein":     true,
-		"welcome":     true,
-		"admin":       true,
-		"admin123":    true,
-		"root":        true,
-		"toor":        true,
-		"pass":        true,
-		"test":        true,
-		"guest":       true,
-		"master":      true,
-		"changeme":    true,
-		"hello":       true,
-		"dragon":      true,
-		"baseball":    true,
-		"iloveyou":    true,
-		"trustno1":    true,
-		"sunshine":    true,
-		"princess":    true,
-		"football":    true,
-		"shadow":      true,
-		"superman":    true,
-		"michael":     true,
-		"ninja":       true,
-		"mustang":     true,
-		"password1!":  true,
-		"abc123":      true,
-		"111111":      true,
-		"000000":      true,
-		"654321":      true,
-		"987654321":   true,
-		"passw0rd":    true,
-		"p@ssw0rd":    true,
-		"p@ssword":    true,
-	}
-
-	return commonPasswords[strings.ToLower(password)]
-}
-
-// hasSequentialChars checks if password contains sequential characters.
-func hasSequentialChars(password string, minSeqLength int) bool {
-	if len(password) < minSeqLength {
-		return false
-	}
-
-	runes := []rune(strings.ToLower(password))
-
-	// Check for ascending sequences
-	ascCount := 1
-	for i := 1; i < len(runes); i++ {
-		if runes[i] == runes[i-1]+1 {
-			ascCount++
-			if ascCount >= minSeqLength {
-				return true
-			}
-		} else {
-			ascCount = 1
-		}
-	}
-
-	// Check for descending sequences
-	descCount := 1
-	for i := 1; i < len(runes); i++ {
-		if runes[i] == runes[i-1]-1 {
-			descCount++
-			if descCount >= minSeqLength {
-				return true
-			}
-		} else {
-			descCount = 1
-		}
-	}
-
-	// Check for keyboard sequences
-	keyboardSequences := []string{
-		"qwerty", "asdfgh", "zxcvbn", "qazwsx", "!@#$%^",
-		"йцукен", "фывапр", "ячсмит",
-	}
-
-	passwordLower := strings.ToLower(password)
-	for _, seq := range keyboardSequences {
-		if len(seq) >= minSeqLength && strings.Contains(passwordLower, seq[:minSeqLength]) {
-			return true
-		}
-	}
-
-	return false
-}
-
-// hasRepeatedChars checks if password contains too many repeated characters.
-func hasRepeatedChars(password string, maxRepeats int) bool {
-	if len(password) < maxRepeats {
-		return false
-	}
-
-	runes := []rune(password)
-	repeatCount := 1
-
-	for i := 1; i < len(runes); i++ {
-		if runes[i] == runes[i-1] {
-			repeatCount++
-			if repeatCount >= maxRepeats {
-				return true
-			}
-		} else {
-			repeatCount = 1
-		}
-	}
-
-	return false
-}
-
-// itoa converts int to string without importing strconv.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var digits []byte
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	return string(digits)
+// commonPasswords holds frequently leaked passwords in lower case.
+var commonPasswords = map[string]struct{}{
+	"password": {}, "password1": {}, "password123": {}, "password1!": {},
+	"passw0rd": {}, "p@ssw0rd": {}, "p@ssword": {}, "pa$$w0rd": {},
+	"123456": {}, "12345678": {}, "123456789": {}, "1234567890": {},
+	"qwerty": {}, "qwerty123": {}, "qwertyuiop": {}, "qwerty1!": {},
+	"letmein": {}, "welcome": {}, "welcome1": {}, "changeme": {},
+	"admin": {}, "admin123": {}, "administrator": {}, "root": {}, "toor": {},
+	"iloveyou": {}, "trustno1": {}, "sunshine": {}, "princess": {},
+	"football": {}, "baseball": {}, "dragon": {}, "monkey": {}, "shadow": {},
+	"superman": {}, "master": {}, "hello": {}, "abc123": {},
+	"111111": {}, "000000": {}, "654321": {}, "987654321": {},
 }

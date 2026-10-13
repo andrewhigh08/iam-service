@@ -1,157 +1,108 @@
-// Package service contains the business logic layer of the application.
 package service
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
 
 	"github.com/andrewhigh08/iam-service/internal/domain"
+	"github.com/andrewhigh08/iam-service/internal/pkg/apperror"
 	"github.com/andrewhigh08/iam-service/internal/pkg/logger"
+	"github.com/andrewhigh08/iam-service/internal/port"
 )
 
-// Seeder handles database seeding operations for initial data setup.
-//
-// Used to create default RBAC policies and super admin user on first run.
+// adminFullName is the display name of the seeded administrator.
+const adminFullName = "Administrator"
+
+// PolicyAuthorizer is the authorization service as the Seeder needs it: role assignment plus
+// idempotent policy installation. *AuthorizationService satisfies it.
+type PolicyAuthorizer interface {
+	port.AuthorizationService
+	EnsurePolicies(ctx context.Context, policies []domain.Policy) error
+}
+
+// Seeder installs the default policies and the initial administrator. Logger may be nil.
 type Seeder struct {
-	db     *gorm.DB              // Database connection
-	authz  *AuthorizationService // Authorization service for role management
-	logger *logger.Logger        // Logger instance
+	Users  port.UserRepository
+	Authz  PolicyAuthorizer
+	Logger *logger.Logger
 }
 
-// NewSeeder creates a new Seeder instance.
-func NewSeeder(db *gorm.DB, authz *AuthorizationService, log *logger.Logger) *Seeder {
-	return &Seeder{
-		db:     db,
-		authz:  authz,
-		logger: log.WithComponent("seeder"),
+// Seed ensures the default policies exist, creates the administrator when adminEmail is set
+// and no user with that email exists, and grants the admin role to an existing account that
+// lacks it. It is idempotent; the caller provides the transaction and the advisory lock that
+// serialize concurrent replicas.
+func (s *Seeder) Seed(ctx context.Context, adminEmail, adminPassword string) error {
+	if s.Users == nil || s.Authz == nil {
+		return errors.New("seeder: user repository and authorization service are required")
 	}
-}
-
-// SeedAll runs all seeding operations in order.
-//
-// Order: 1) RBAC policies, 2) Super admin user.
-func (s *Seeder) SeedAll(ctx context.Context) error {
-	s.logger.Info("starting database seeding")
-
-	// Seed RBAC policies first
-	if err := s.SeedPolicies(ctx); err != nil {
+	log := componentLogger(s.Logger, "seeder").FromContext(ctx)
+	if err := s.Authz.EnsurePolicies(ctx, domain.DefaultPolicies()); err != nil {
 		return err
 	}
-
-	// Then create super admin
-	if err := s.SeedSuperAdmin(ctx); err != nil {
-		return err
-	}
-
-	s.logger.Info("database seeding completed successfully")
-	return nil
-}
-
-// SeedPolicies seeds the base RBAC policies into Casbin.
-//
-// Policies define what actions each role can perform on resources:
-//   - admin: full access to all resources
-//   - analyst: read-only users, full audit access
-//   - viewer: minimal read-only access
-func (s *Seeder) SeedPolicies(_ context.Context) error {
-	enforcer := s.authz.GetEnforcer()
-
-	// Define base policies: role, resource, action
-	policies := [][]string{
-		// Admin - full access
-		{"role:admin", "users", "read"},
-		{"role:admin", "users", "write"},
-		{"role:admin", "users", "delete"},
-		{"role:admin", "audit", "read"},
-		{"role:admin", "settings", "read"},
-		{"role:admin", "settings", "write"},
-
-		// Analyst - read-only for users, full audit access
-		{"role:analyst", "users", "read"},
-		{"role:analyst", "audit", "read"},
-		{"role:analyst", "settings", "read"},
-
-		// Viewer - minimal access
-		{"role:viewer", "users", "read"},
-	}
-
-	// Add policies that don't already exist
-	for _, policy := range policies {
-		hasPolicy, err := enforcer.HasPolicy(policy)
-		if err != nil {
-			s.logger.Error("failed to check policy", "policy", policy, "error", err)
-			continue
-		}
-		if !hasPolicy {
-			if _, err := enforcer.AddPolicy(policy); err != nil {
-				s.logger.Error("failed to add policy", "policy", policy, "error", err)
-			} else {
-				s.logger.Debug("policy added", "policy", policy)
-			}
-		}
-	}
-
-	s.logger.Info("policies seeded successfully")
-	return nil
-}
-
-// SeedSuperAdmin creates the default super admin user if it doesn't exist.
-//
-// Uses hardcoded credentials for initial setup. Should be changed after first login.
-func (s *Seeder) SeedSuperAdmin(ctx context.Context) error {
-	// Default admin credentials
-	const (
-		adminEmail    = "samdawsonbai@gmail.com"
-		adminPassword = "AdminSecret123!"
-		adminFullName = "Super Admin"
-	)
-
-	// Check if admin already exists
-	var count int64
-	if err := s.db.Model(&domain.User{}).Where("email = ?", adminEmail).Count(&count).Error; err != nil {
-		s.logger.Error("failed to check for existing admin", "error", err)
-		return err
-	}
-
-	if count > 0 {
-		s.logger.Info("super admin already exists, skipping")
+	email := normalizeEmail(adminEmail)
+	if email == "" {
+		log.Info("admin seeding skipped: no admin email configured")
 		return nil
 	}
+	if adminPassword == "" {
+		return apperror.Internal("admin password is required to seed the administrator", nil)
+	}
+	admin, err := s.Users.FindByEmail(ctx, email)
+	switch {
+	case isNotFound(err):
+		return s.createAdmin(ctx, email, adminPassword, log)
+	case err != nil:
+		return asInternal("failed to check admin account", err)
+	}
+	return s.ensureAdminRole(ctx, admin, log)
+}
 
-	// Hash password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
+// createAdmin inserts the administrator and grants the admin role. The caller's transaction
+// is rolled back on failure, so no half-created account survives.
+func (s *Seeder) createAdmin(ctx context.Context, email, password string, log *logger.Logger) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		s.logger.Error("failed to hash admin password", "error", err)
-		return err
+		return apperror.Internal(msgHashingFailed, err)
 	}
-
-	// Create admin user
+	now := time.Now()
 	admin := &domain.User{
-		Email:        adminEmail,
-		PasswordHash: string(hashedPassword),
-		PasswordType: domain.PasswordTypePermanent,
-		FullName:     adminFullName,
-		IsBlocked:    false,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		Email:             email,
+		PasswordHash:      string(hash),
+		PasswordTemporary: false,
+		PasswordChangedAt: now,
+		FullName:          adminFullName,
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
-
-	if err := s.db.Create(admin).Error; err != nil {
-		s.logger.Error("failed to create admin user", "error", err)
+	if err := s.Users.Create(ctx, admin); err != nil {
+		return asInternal("failed to create admin account", err)
+	}
+	if err := s.Authz.AssignRole(ctx, admin.ID, domain.RoleAdmin); err != nil {
 		return err
 	}
+	log.Info("admin account created", "user_id", admin.ID, "email", email)
+	return nil
+}
 
-	// Assign admin role
-	if err := s.authz.AddRoleToUser(ctx, admin.ID, "admin"); err != nil {
-		s.logger.Error("failed to assign admin role", "error", err)
-		// Clean up created user on role assignment failure
-		s.db.Unscoped().Delete(admin)
+// ensureAdminRole grants the admin role to an existing account configured as the
+// administrator, so that repointing ADMIN_EMAIL or restoring the policy table separately
+// from the users never leaves the service without an administrator.
+func (s *Seeder) ensureAdminRole(ctx context.Context, admin *domain.User, log *logger.Logger) error {
+	roles, err := s.Authz.RolesOf(ctx, admin.ID)
+	if err != nil {
 		return err
 	}
-
-	s.logger.Info("super admin created successfully", "email", adminEmail)
+	if slices.Contains(roles, domain.RoleAdmin) {
+		log.Debug("admin account already exists", "user_id", admin.ID)
+		return nil
+	}
+	if err := s.Authz.AssignRole(ctx, admin.ID, domain.RoleAdmin); err != nil {
+		return err
+	}
+	log.Info("admin role granted to the existing admin account", "user_id", admin.ID, "email", admin.Email)
 	return nil
 }

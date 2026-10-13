@@ -1,4 +1,3 @@
-// Package handler provides HTTP request handlers for the IAM service.
 package handler
 
 import (
@@ -7,17 +6,16 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
-// Swagger API documentation metadata.
+// Swagger general API information.
 // @title IAM Service API
 // @version 1.0
-// @description Identity and Access Management Service API
-// @termsOfService http://swagger.io/terms/
+// @description Identity and Access Management service: login with RS256 access tokens and rotating refresh tokens, session management, role-based authorization and user administration. Every JSON endpoint except the JWKS and health probes answers with the {success, data, error, meta} envelope.
 
 // @contact.name API Support
 // @contact.url https://github.com/andrewhigh08/iam-service
 
-// @license.name Apache 2.0
-// @license.url http://www.apache.org/licenses/LICENSE-2.0.html
+// @license.name MIT
+// @license.url https://opensource.org/licenses/MIT
 
 // @host localhost:8080
 // @BasePath /
@@ -26,36 +24,13 @@ import (
 // @securityDefinitions.apikey BearerAuth
 // @in header
 // @name Authorization
-// @description Type "Bearer" followed by a space and JWT token.
+// @description Type "Bearer" followed by a space and the access token.
 
-// RegisterSwagger registers Swagger documentation routes.
-//
-// Swagger UI is available at /swagger/index.html.
+// RegisterSwagger mounts the Swagger UI at /swagger/*any; the spec is served from /swagger/doc.json.
 func RegisterSwagger(router *gin.Engine) {
-	// Serve Swagger UI at /swagger/*
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler,
-		ginSwagger.URL("/swagger/doc.json"),     // URL to swagger.json
-		ginSwagger.DefaultModelsExpandDepth(-1), // Hide models by default
-		ginSwagger.PersistAuthorization(true),   // Remember auth token
+		ginSwagger.URL("/swagger/doc.json"),
+		ginSwagger.DefaultModelsExpandDepth(-1),
+		ginSwagger.PersistAuthorization(true),
 	))
-}
-
-// SwaggerInfo holds Swagger documentation metadata.
-type SwaggerInfo struct {
-	Title       string // API title
-	Description string // API description
-	Version     string // API version
-	Host        string // API host
-	BasePath    string // API base path
-}
-
-// GetSwaggerInfo returns Swagger documentation info.
-func GetSwaggerInfo() SwaggerInfo {
-	return SwaggerInfo{
-		Title:       "IAM Service API",
-		Description: "Identity and Access Management Service providing authentication, authorization, and user management",
-		Version:     "1.0",
-		Host:        "localhost:8080",
-		BasePath:    "/",
-	}
 }
