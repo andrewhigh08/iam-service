@@ -1,5 +1,4 @@
 // Package handler provides HTTP request handlers for the IAM service.
-// Пакет handler предоставляет обработчики HTTP запросов для IAM сервиса.
 package handler
 
 import (
@@ -14,17 +13,14 @@ import (
 )
 
 // UserHandler handles user-related HTTP requests.
-// UserHandler обрабатывает HTTP запросы, связанные с пользователями.
 //
 // Provides CRUD endpoints for user management.
-// Предоставляет CRUD эндпоинты для управления пользователями.
 type UserHandler struct {
-	userService port.UserService // User service / Сервис пользователей
-	logger      *logger.Logger   // Logger instance / Экземпляр логгера
+	userService port.UserService // User service
+	logger      *logger.Logger   // Logger instance
 }
 
 // NewUserHandler creates a new UserHandler instance.
-// NewUserHandler создаёт новый экземпляр UserHandler.
 func NewUserHandler(userService port.UserService, log *logger.Logger) *UserHandler {
 	return &UserHandler{
 		userService: userService,
@@ -33,23 +29,20 @@ func NewUserHandler(userService port.UserService, log *logger.Logger) *UserHandl
 }
 
 // UserResponse represents a user in API responses.
-// UserResponse представляет пользователя в ответах API.
 type UserResponse struct {
-	ID        int64  `json:"id"`                   // User ID / ID пользователя
-	Email     string `json:"email"`                // User email / Email пользователя
-	FullName  string `json:"full_name"`            // Full name / Полное имя
-	IsBlocked bool   `json:"is_blocked"`           // Blocked status / Статус блокировки
-	CreatedAt string `json:"created_at,omitempty"` // Creation timestamp / Время создания
+	ID        int64  `json:"id"`                   // User ID
+	Email     string `json:"email"`                // User email
+	FullName  string `json:"full_name"`            // Full name
+	IsBlocked bool   `json:"is_blocked"`           // Blocked status
+	CreatedAt string `json:"created_at,omitempty"` // Creation timestamp
 }
 
 // ListUsersResponse represents the list users response.
-// ListUsersResponse представляет ответ со списком пользователей.
 type ListUsersResponse struct {
-	Users []UserResponse `json:"users"` // Users list / Список пользователей
+	Users []UserResponse `json:"users"` // Users list
 }
 
 // ListUsers handles GET /api/v1/users.
-// ListUsers обрабатывает GET /api/v1/users.
 // @Summary List users
 // @Description Get paginated list of users with optional filtering
 // @Tags users
@@ -65,7 +58,7 @@ type ListUsersResponse struct {
 // @Failure 403 {object} response.APIResponse
 // @Router /api/v1/users [get]
 func (h *UserHandler) ListUsers(c *gin.Context) {
-	// Parse query parameters / Парсим параметры запроса
+	// Parse query parameters
 	status := c.DefaultQuery("status", "all")
 	search := c.Query("search")
 
@@ -78,7 +71,7 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 		pageSize = 10
 	}
 
-	// Validate pagination / Валидируем пагинацию
+	// Validate pagination
 	if page < 1 {
 		page = 1
 	}
@@ -86,7 +79,7 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 		pageSize = 10
 	}
 	if pageSize > 100 {
-		pageSize = 100 // Maximum page size / Максимальный размер страницы
+		pageSize = 100 // Maximum page size
 	}
 
 	filter := port.UserFilter{
@@ -102,7 +95,7 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 		return
 	}
 
-	// Transform to response format / Преобразуем в формат ответа
+	// Transform to response format
 	userResponses := make([]UserResponse, 0, len(users))
 	for _, u := range users {
 		userResponses = append(userResponses, UserResponse{
@@ -118,26 +111,23 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 }
 
 // CreateUserRequest represents the create user request body.
-// CreateUserRequest представляет тело запроса на создание пользователя.
 type CreateUserRequest struct {
-	Email        string `json:"email" binding:"required,email"`                            // User email / Email пользователя
-	Password     string `json:"password" binding:"required,min=8"`                         // Password (min 8 chars) / Пароль (мин. 8 символов)
-	FullName     string `json:"full_name" binding:"required"`                              // Full name / Полное имя
-	Role         string `json:"role" binding:"required,oneof=admin analyst viewer"`        // User role / Роль пользователя
-	PasswordType string `json:"password_type" binding:"omitempty,oneof=permanent onetime"` // Password type / Тип пароля
+	Email        string `json:"email" binding:"required,email"`                            // User email
+	Password     string `json:"password" binding:"required,min=8"`                         // Password (min 8 chars)
+	FullName     string `json:"full_name" binding:"required"`                              // Full name
+	Role         string `json:"role" binding:"required,oneof=admin analyst viewer"`        // User role
+	PasswordType string `json:"password_type" binding:"omitempty,oneof=permanent onetime"` // Password type
 }
 
 // CreateUserResponse represents the create user response.
-// CreateUserResponse представляет ответ на создание пользователя.
 type CreateUserResponse struct {
-	ID        int64  `json:"id"`         // User ID / ID пользователя
-	Email     string `json:"email"`      // User email / Email пользователя
-	FullName  string `json:"full_name"`  // Full name / Полное имя
-	CreatedAt string `json:"created_at"` // Creation timestamp / Время создания
+	ID        int64  `json:"id"`         // User ID
+	Email     string `json:"email"`      // User email
+	FullName  string `json:"full_name"`  // Full name
+	CreatedAt string `json:"created_at"` // Creation timestamp
 }
 
 // CreateUser handles POST /api/v1/users.
-// CreateUser обрабатывает POST /api/v1/users.
 // @Summary Create user
 // @Description Create a new user with specified role
 // @Tags users
@@ -160,7 +150,7 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		return
 	}
 
-	// Get admin context / Получаем контекст администратора
+	// Get admin context
 	adminID := c.GetInt64("user_id")
 	ipAddress := c.ClientIP()
 	userAgent := c.GetHeader("User-Agent")
@@ -180,7 +170,6 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 }
 
 // GetUser handles GET /api/v1/users/:id.
-// GetUser обрабатывает GET /api/v1/users/:id.
 // @Summary Get user
 // @Description Get user details by ID
 // @Tags users
@@ -217,7 +206,6 @@ func (h *UserHandler) GetUser(c *gin.Context) {
 }
 
 // BlockUser handles POST /api/v1/users/:id/block.
-// BlockUser обрабатывает POST /api/v1/users/:id/block.
 // @Summary Block user
 // @Description Block a user account
 // @Tags users
@@ -238,7 +226,7 @@ func (h *UserHandler) BlockUser(c *gin.Context) {
 		return
 	}
 
-	// Get admin context / Получаем контекст администратора
+	// Get admin context
 	adminID := c.GetInt64("user_id")
 	ipAddress := c.ClientIP()
 	userAgent := c.GetHeader("User-Agent")
@@ -252,7 +240,6 @@ func (h *UserHandler) BlockUser(c *gin.Context) {
 }
 
 // UnblockUser handles POST /api/v1/users/:id/unblock.
-// UnblockUser обрабатывает POST /api/v1/users/:id/unblock.
 // @Summary Unblock user
 // @Description Unblock a user account
 // @Tags users
@@ -273,7 +260,7 @@ func (h *UserHandler) UnblockUser(c *gin.Context) {
 		return
 	}
 
-	// Get admin context / Получаем контекст администратора
+	// Get admin context
 	adminID := c.GetInt64("user_id")
 	ipAddress := c.ClientIP()
 	userAgent := c.GetHeader("User-Agent")

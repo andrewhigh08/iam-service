@@ -1,5 +1,4 @@
 // Package service contains the business logic layer of the application.
-// Пакет service содержит слой бизнес-логики приложения.
 package service
 
 import (
@@ -17,19 +16,15 @@ import (
 )
 
 // AuditService implements port.AuditService interface.
-// AuditService реализует интерфейс port.AuditService.
 //
 // Provides audit logging for tracking user actions for security,
 // compliance, and debugging purposes.
-// Предоставляет аудит-логирование для отслеживания действий пользователей
-// в целях безопасности, соответствия требованиям и отладки.
 type AuditService struct {
-	auditRepo port.AuditLogRepository // Audit log repository / Репозиторий аудит-лога
-	logger    *logger.Logger          // Logger instance / Экземпляр логгера
+	auditRepo port.AuditLogRepository // Audit log repository
+	logger    *logger.Logger          // Logger instance
 }
 
 // NewAuditService creates a new AuditService instance.
-// NewAuditService создаёт новый экземпляр AuditService.
 func NewAuditService(auditRepo port.AuditLogRepository, log *logger.Logger) *AuditService {
 	return &AuditService{
 		auditRepo: auditRepo,
@@ -38,30 +33,27 @@ func NewAuditService(auditRepo port.AuditLogRepository, log *logger.Logger) *Aud
 }
 
 // LogAction logs an action to the audit trail.
-// LogAction записывает действие в аудит-лог.
 func (s *AuditService) LogAction(ctx context.Context, userID int64, action, resourceType, resourceID string, details map[string]interface{}) error {
 	return s.LogActionWithContext(ctx, userID, action, resourceType, resourceID, details, "", "")
 }
 
 // LogActionTx logs an action within an existing transaction.
-// LogActionTx записывает действие в рамках существующей транзакции.
 func (s *AuditService) LogActionTx(ctx context.Context, tx *gorm.DB, userID int64, action, resourceType, resourceID string, details map[string]interface{}) error {
 	return s.LogActionWithContextTx(ctx, tx, userID, action, resourceType, resourceID, details, "", "")
 }
 
 // LogActionWithContext logs an action with IP address and user agent.
-// LogActionWithContext записывает действие с IP-адресом и user agent.
 func (s *AuditService) LogActionWithContext(ctx context.Context, userID int64, action, resourceType, resourceID string, details map[string]interface{}, ipAddress, userAgent string) error {
 	log := s.logger.WithContext(ctx)
 
-	// Serialize details to JSON / Сериализуем детали в JSON
+	// Serialize details to JSON
 	detailsJSON, err := json.Marshal(details)
 	if err != nil {
 		log.Error("failed to marshal audit details", "error", err)
 		return apperror.Internal("failed to marshal audit details", err)
 	}
 
-	// Prepare optional fields / Подготавливаем опциональные поля
+	// Prepare optional fields
 	var ipPtr, uaPtr *string
 	if ipAddress != "" {
 		ipPtr = &ipAddress
@@ -70,7 +62,7 @@ func (s *AuditService) LogActionWithContext(ctx context.Context, userID int64, a
 		uaPtr = &userAgent
 	}
 
-	// Create audit log entry / Создаём запись аудит-лога
+	// Create audit log entry
 	auditLog := &domain.AuditLog{
 		UserID:       userID,
 		Action:       action,
@@ -92,20 +84,18 @@ func (s *AuditService) LogActionWithContext(ctx context.Context, userID int64, a
 }
 
 // LogActionWithContextTx logs an action with context within a transaction.
-// LogActionWithContextTx записывает действие с контекстом в рамках транзакции.
 // Use this when audit log must be part of a larger atomic operation.
-// Используйте, когда аудит-лог должен быть частью большой атомарной операции.
 func (s *AuditService) LogActionWithContextTx(ctx context.Context, tx *gorm.DB, userID int64, action, resourceType, resourceID string, details map[string]interface{}, ipAddress, userAgent string) error {
 	log := s.logger.WithContext(ctx)
 
-	// Serialize details to JSON / Сериализуем детали в JSON
+	// Serialize details to JSON
 	detailsJSON, err := json.Marshal(details)
 	if err != nil {
 		log.Error("failed to marshal audit details", "error", err)
 		return apperror.Internal("failed to marshal audit details", err)
 	}
 
-	// Prepare optional fields / Подготавливаем опциональные поля
+	// Prepare optional fields
 	var ipPtr, uaPtr *string
 	if ipAddress != "" {
 		ipPtr = &ipAddress
@@ -114,7 +104,7 @@ func (s *AuditService) LogActionWithContextTx(ctx context.Context, tx *gorm.DB, 
 		uaPtr = &userAgent
 	}
 
-	// Create audit log entry / Создаём запись аудит-лога
+	// Create audit log entry
 	auditLog := &domain.AuditLog{
 		UserID:       userID,
 		Action:       action,
@@ -126,7 +116,7 @@ func (s *AuditService) LogActionWithContextTx(ctx context.Context, tx *gorm.DB, 
 		CreatedAt:    time.Now(),
 	}
 
-	// Use repository's transaction method / Используем транзакционный метод репозитория
+	// Use repository's transaction method
 	repo, ok := s.auditRepo.(*postgres.AuditLogRepository)
 	if !ok {
 		return apperror.Internal("invalid repository type", nil)
@@ -141,10 +131,9 @@ func (s *AuditService) LogActionWithContextTx(ctx context.Context, tx *gorm.DB, 
 }
 
 // GetUserAuditLogs retrieves recent audit log entries for a user.
-// GetUserAuditLogs получает последние записи аудит-лога для пользователя.
 func (s *AuditService) GetUserAuditLogs(ctx context.Context, userID int64, limit int) ([]domain.AuditLog, error) {
 	if limit <= 0 {
-		limit = 50 // Default limit / Лимит по умолчанию
+		limit = 50 // Default limit
 	}
 	return s.auditRepo.FindByUserID(ctx, userID, limit)
 }

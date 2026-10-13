@@ -1,5 +1,4 @@
 // Package middleware provides HTTP middleware components for the Gin framework.
-// Пакет middleware предоставляет компоненты HTTP middleware для фреймворка Gin.
 package middleware
 
 import (
@@ -10,29 +9,26 @@ import (
 )
 
 // SecurityConfig holds security middleware configuration.
-// SecurityConfig содержит конфигурацию middleware безопасности.
 type SecurityConfig struct {
-	// CORS settings / Настройки CORS
-	AllowOrigins     []string // Allowed origins / Разрешённые источники
-	AllowMethods     []string // Allowed HTTP methods / Разрешённые HTTP методы
-	AllowHeaders     []string // Allowed request headers / Разрешённые заголовки запроса
-	ExposeHeaders    []string // Headers exposed to client / Заголовки, доступные клиенту
-	AllowCredentials bool     // Allow credentials / Разрешить учётные данные
-	MaxAge           int      // Preflight cache duration (seconds) / Длительность кэша preflight (секунды)
+	// CORS settings
+	AllowOrigins     []string // Allowed origins
+	AllowMethods     []string // Allowed HTTP methods
+	AllowHeaders     []string // Allowed request headers
+	ExposeHeaders    []string // Headers exposed to client
+	AllowCredentials bool     // Allow credentials
+	MaxAge           int      // Preflight cache duration (seconds)
 
-	// Security headers / Заголовки безопасности
-	ContentSecurityPolicy   string // CSP header value / Значение заголовка CSP
-	XFrameOptions           string // X-Frame-Options header / Заголовок X-Frame-Options
-	XContentTypeOptions     string // X-Content-Type-Options header / Заголовок X-Content-Type-Options
-	XXSSProtection          string // X-XSS-Protection header / Заголовок X-XSS-Protection
-	ReferrerPolicy          string // Referrer-Policy header / Заголовок Referrer-Policy
-	StrictTransportSecurity string // HSTS header / Заголовок HSTS
+	// Security headers
+	ContentSecurityPolicy   string // CSP header value
+	XFrameOptions           string // X-Frame-Options header
+	XContentTypeOptions     string // X-Content-Type-Options header
+	XXSSProtection          string // X-XSS-Protection header
+	ReferrerPolicy          string // Referrer-Policy header
+	StrictTransportSecurity string // HSTS header
 }
 
 // DefaultSecurityConfig returns default security configuration.
-// DefaultSecurityConfig возвращает конфигурацию безопасности по умолчанию.
 // Suitable for development. Use ProductionSecurityConfig for production.
-// Подходит для разработки. Для продакшена используйте ProductionSecurityConfig.
 func DefaultSecurityConfig() SecurityConfig {
 	return SecurityConfig{
 		AllowOrigins:     []string{"*"},
@@ -40,7 +36,7 @@ func DefaultSecurityConfig() SecurityConfig {
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Request-ID"},
 		ExposeHeaders:    []string{"X-Request-ID", "X-RateLimit-Limit", "X-RateLimit-Remaining"},
 		AllowCredentials: true,
-		MaxAge:           86400, // 24 hours / 24 часа
+		MaxAge:           86400, // 24 hours
 
 		ContentSecurityPolicy:   "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'",
 		XFrameOptions:           "DENY",
@@ -52,7 +48,6 @@ func DefaultSecurityConfig() SecurityConfig {
 }
 
 // ProductionSecurityConfig returns stricter security configuration for production.
-// ProductionSecurityConfig возвращает более строгую конфигурацию безопасности для продакшена.
 func ProductionSecurityConfig(allowedOrigins []string) SecurityConfig {
 	cfg := DefaultSecurityConfig()
 	cfg.AllowOrigins = allowedOrigins
@@ -61,30 +56,28 @@ func ProductionSecurityConfig(allowedOrigins []string) SecurityConfig {
 }
 
 // SecurityHeaders returns a middleware that adds security headers to responses.
-// SecurityHeaders возвращает middleware, который добавляет заголовки безопасности к ответам.
 //
-// Headers added / Добавляемые заголовки:
-//   - X-Content-Type-Options: prevents MIME type sniffing / предотвращает MIME sniffing
-//   - X-Frame-Options: prevents clickjacking / предотвращает clickjacking
-//   - X-XSS-Protection: enables XSS filter / включает XSS фильтр
-//   - Referrer-Policy: controls referrer information / контролирует информацию о referrer
-//   - Content-Security-Policy: restricts resource loading / ограничивает загрузку ресурсов
-//   - Strict-Transport-Security: enforces HTTPS / принуждает использовать HTTPS
+// Headers added:
+//   - X-Content-Type-Options: prevents MIME type sniffing
+//   - X-Frame-Options: prevents clickjacking
+//   - X-XSS-Protection: enables XSS filter
+//   - Referrer-Policy: controls referrer information
+//   - Content-Security-Policy: restricts resource loading
+//   - Strict-Transport-Security: enforces HTTPS
 func SecurityHeaders(config SecurityConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Set security headers / Устанавливаем заголовки безопасности
+		// Set security headers
 		c.Header("X-Content-Type-Options", config.XContentTypeOptions)
 		c.Header("X-Frame-Options", config.XFrameOptions)
 		c.Header("X-XSS-Protection", config.XXSSProtection)
 		c.Header("Referrer-Policy", config.ReferrerPolicy)
 
 		// Only set CSP for non-Swagger paths (Swagger needs inline scripts)
-		// CSP только для не-Swagger путей (Swagger требует inline скриптов)
 		if !strings.HasPrefix(c.Request.URL.Path, "/swagger") {
 			c.Header("Content-Security-Policy", config.ContentSecurityPolicy)
 		}
 
-		// HSTS only for HTTPS connections / HSTS только для HTTPS соединений
+		// HSTS only for HTTPS connections
 		if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
 			c.Header("Strict-Transport-Security", config.StrictTransportSecurity)
 		}
@@ -94,17 +87,15 @@ func SecurityHeaders(config SecurityConfig) gin.HandlerFunc {
 }
 
 // CORS returns a middleware that handles Cross-Origin Resource Sharing.
-// CORS возвращает middleware, который обрабатывает Cross-Origin Resource Sharing.
 //
 // Handles preflight OPTIONS requests and sets appropriate CORS headers.
-// Обрабатывает preflight OPTIONS запросы и устанавливает соответствующие CORS заголовки.
 func CORS(config SecurityConfig) gin.HandlerFunc {
 	allowAllOrigins := len(config.AllowOrigins) == 1 && config.AllowOrigins[0] == "*"
 
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
 
-		// Handle preflight requests / Обрабатываем preflight запросы
+		// Handle preflight requests
 		if c.Request.Method == http.MethodOptions {
 			switch {
 			case allowAllOrigins:
@@ -121,7 +112,6 @@ func CORS(config SecurityConfig) gin.HandlerFunc {
 			c.Header("Access-Control-Max-Age", string(rune(config.MaxAge)))
 
 			// Don't allow credentials with wildcard origin
-			// Не разрешаем credentials с wildcard origin
 			if config.AllowCredentials && !allowAllOrigins {
 				c.Header("Access-Control-Allow-Credentials", "true")
 			}
@@ -130,7 +120,7 @@ func CORS(config SecurityConfig) gin.HandlerFunc {
 			return
 		}
 
-		// Handle actual requests / Обрабатываем обычные запросы
+		// Handle actual requests
 		switch {
 		case allowAllOrigins:
 			c.Header("Access-Control-Allow-Origin", "*")
@@ -141,7 +131,7 @@ func CORS(config SecurityConfig) gin.HandlerFunc {
 			}
 		}
 
-		// Expose headers to client / Делаем заголовки доступными клиенту
+		// Expose headers to client
 		if len(config.ExposeHeaders) > 0 {
 			c.Header("Access-Control-Expose-Headers", strings.Join(config.ExposeHeaders, ", "))
 		}
@@ -151,7 +141,6 @@ func CORS(config SecurityConfig) gin.HandlerFunc {
 }
 
 // isOriginAllowed checks if the origin is in the allowed list.
-// isOriginAllowed проверяет, находится ли origin в списке разрешённых.
 func isOriginAllowed(origin string, allowed []string) bool {
 	for _, a := range allowed {
 		if a == origin || a == "*" {
@@ -162,9 +151,7 @@ func isOriginAllowed(origin string, allowed []string) bool {
 }
 
 // NoCache returns a middleware that adds cache-control headers to prevent caching.
-// NoCache возвращает middleware, который добавляет заголовки для предотвращения кэширования.
 // Use this for sensitive endpoints like authentication.
-// Используйте для чувствительных эндпоинтов, например, аутентификации.
 func NoCache() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")

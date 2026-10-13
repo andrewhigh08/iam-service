@@ -1,13 +1,12 @@
 // Package logger provides structured logging functionality based on slog.
-// Пакет logger предоставляет функциональность структурированного логирования на базе slog.
 //
-// Features / Возможности:
-//   - JSON and text output formats / Форматы вывода JSON и text
-//   - Context-aware logging (request ID, user ID, trace ID) / Логирование с контекстом
-//   - Specialized logging methods for HTTP, DB, cache, auth / Специализированные методы логирования
-//   - Configurable log levels / Настраиваемые уровни логирования
+// Features:
+//   - JSON and text output formats
+//   - Context-aware logging (request ID, user ID, trace ID)
+//   - Specialized logging methods for HTTP, DB, cache, auth
+//   - Configurable log levels
 //
-// Usage example / Пример использования:
+// Usage example:
 //
 //	log := logger.New(logger.Config{Level: "info", Format: "json"})
 //	log.Info("server started", slog.String("port", "8080"))
@@ -23,43 +22,35 @@ import (
 )
 
 // contextKey is a custom type for context keys to avoid collisions.
-// contextKey — пользовательский тип для ключей контекста во избежание коллизий.
 type contextKey string
 
 // Context keys for storing values in context.
-// Ключи контекста для хранения значений в контексте.
 const (
 	// RequestIDKey is the context key for request ID.
-	// RequestIDKey — ключ контекста для ID запроса.
 	RequestIDKey contextKey = "request_id"
 
 	// UserIDKey is the context key for user ID.
-	// UserIDKey — ключ контекста для ID пользователя.
 	UserIDKey contextKey = "user_id"
 
 	// TraceIDKey is the context key for trace ID (OpenTelemetry).
-	// TraceIDKey — ключ контекста для ID трассировки (OpenTelemetry).
 	TraceIDKey contextKey = "trace_id"
 )
 
 // Logger wraps slog.Logger with additional functionality.
-// Logger оборачивает slog.Logger с дополнительной функциональностью.
 type Logger struct {
 	*slog.Logger
 }
 
 // Config holds logger configuration options.
-// Config содержит параметры конфигурации логгера.
 type Config struct {
-	Level      string    // Log level: "debug", "info", "warn", "error" / Уровень: "debug", "info", "warn", "error"
-	Format     string    // Output format: "json", "text" / Формат вывода: "json", "text"
-	AddSource  bool      // Include source file and line / Включать файл и строку исходника
-	TimeFormat string    // Time format string / Формат времени
-	Output     io.Writer // Output writer (default: os.Stdout) / Writer для вывода (по умолчанию: os.Stdout)
+	Level      string    // Log level: "debug", "info", "warn", "error"
+	Format     string    // Output format: "json", "text"
+	AddSource  bool      // Include source file and line
+	TimeFormat string    // Time format string
+	Output     io.Writer // Output writer (default: os.Stdout)
 }
 
 // DefaultConfig returns the default logger configuration.
-// DefaultConfig возвращает конфигурацию логгера по умолчанию.
 func DefaultConfig() Config {
 	return Config{
 		Level:      "info",
@@ -71,7 +62,6 @@ func DefaultConfig() Config {
 }
 
 // New creates a new Logger with the given configuration.
-// New создаёт новый Logger с заданной конфигурацией.
 func New(cfg Config) *Logger {
 	if cfg.Output == nil {
 		cfg.Output = os.Stdout
@@ -83,7 +73,7 @@ func New(cfg Config) *Logger {
 		Level:     level,
 		AddSource: cfg.AddSource,
 		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
-			// Custom time formatting / Пользовательское форматирование времени
+			// Custom time formatting
 			if a.Key == slog.TimeKey {
 				if t, ok := a.Value.Any().(time.Time); ok {
 					return slog.String(slog.TimeKey, t.Format(cfg.TimeFormat))
@@ -106,13 +96,11 @@ func New(cfg Config) *Logger {
 }
 
 // NewDefault creates a logger with default configuration.
-// NewDefault создаёт логгер с конфигурацией по умолчанию.
 func NewDefault() *Logger {
 	return New(DefaultConfig())
 }
 
 // parseLevel converts a string level to slog.Level.
-// parseLevel преобразует строковый уровень в slog.Level.
 func parseLevel(level string) slog.Level {
 	switch level {
 	case "debug":
@@ -129,7 +117,6 @@ func parseLevel(level string) slog.Level {
 }
 
 // WithContext returns a logger enriched with context values (request_id, user_id, trace_id).
-// WithContext возвращает логгер, обогащённый значениями из контекста (request_id, user_id, trace_id).
 func (l *Logger) WithContext(ctx context.Context) *Logger {
 	attrs := make([]any, 0)
 
@@ -153,7 +140,6 @@ func (l *Logger) WithContext(ctx context.Context) *Logger {
 }
 
 // WithRequestID returns a logger with request ID field.
-// WithRequestID возвращает логгер с полем request ID.
 func (l *Logger) WithRequestID(requestID string) *Logger {
 	return &Logger{
 		Logger: l.Logger.With(slog.String("request_id", requestID)),
@@ -161,7 +147,6 @@ func (l *Logger) WithRequestID(requestID string) *Logger {
 }
 
 // WithUserID returns a logger with user ID field.
-// WithUserID возвращает логгер с полем user ID.
 func (l *Logger) WithUserID(userID int64) *Logger {
 	return &Logger{
 		Logger: l.Logger.With(slog.Int64("user_id", userID)),
@@ -169,7 +154,6 @@ func (l *Logger) WithUserID(userID int64) *Logger {
 }
 
 // WithError returns a logger with error information.
-// WithError возвращает логгер с информацией об ошибке.
 func (l *Logger) WithError(err error) *Logger {
 	return &Logger{
 		Logger: l.Logger.With(slog.String("error", err.Error())),
@@ -177,7 +161,6 @@ func (l *Logger) WithError(err error) *Logger {
 }
 
 // WithFields returns a logger with additional custom fields.
-// WithFields возвращает логгер с дополнительными пользовательскими полями.
 func (l *Logger) WithFields(fields map[string]interface{}) *Logger {
 	attrs := make([]any, 0, len(fields)*2)
 	for k, v := range fields {
@@ -189,7 +172,6 @@ func (l *Logger) WithFields(fields map[string]interface{}) *Logger {
 }
 
 // WithComponent returns a logger with a component name field.
-// WithComponent возвращает логгер с полем имени компонента.
 func (l *Logger) WithComponent(component string) *Logger {
 	return &Logger{
 		Logger: l.Logger.With(slog.String("component", component)),
@@ -197,7 +179,6 @@ func (l *Logger) WithComponent(component string) *Logger {
 }
 
 // WithService returns a logger with a service name field.
-// WithService возвращает логгер с полем имени сервиса.
 func (l *Logger) WithService(service string) *Logger {
 	return &Logger{
 		Logger: l.Logger.With(slog.String("service", service)),
@@ -205,7 +186,6 @@ func (l *Logger) WithService(service string) *Logger {
 }
 
 // LogRequest logs an HTTP request with method, path, status, duration, and client IP.
-// LogRequest логирует HTTP запрос с методом, путём, статусом, длительностью и IP клиента.
 func (l *Logger) LogRequest(method, path string, statusCode int, duration time.Duration, clientIP string) {
 	l.Info("http request",
 		slog.String("method", method),
@@ -217,7 +197,6 @@ func (l *Logger) LogRequest(method, path string, statusCode int, duration time.D
 }
 
 // LogDBQuery logs a database query with query string, duration, and rows affected.
-// LogDBQuery логирует запрос к БД с текстом запроса, длительностью и количеством затронутых строк.
 func (l *Logger) LogDBQuery(query string, duration time.Duration, rowsAffected int64) {
 	l.Debug("database query",
 		slog.String("query", query),
@@ -227,7 +206,6 @@ func (l *Logger) LogDBQuery(query string, duration time.Duration, rowsAffected i
 }
 
 // LogCacheOperation logs a cache operation (get, set, delete) with hit/miss status.
-// LogCacheOperation логирует операцию кэша (get, set, delete) со статусом hit/miss.
 func (l *Logger) LogCacheOperation(operation, key string, hit bool, duration time.Duration) {
 	l.Debug("cache operation",
 		slog.String("operation", operation),
@@ -238,7 +216,6 @@ func (l *Logger) LogCacheOperation(operation, key string, hit bool, duration tim
 }
 
 // LogAuthAttempt logs an authentication attempt with success/failure status.
-// LogAuthAttempt логирует попытку аутентификации со статусом успех/неудача.
 func (l *Logger) LogAuthAttempt(email string, success bool, reason string) {
 	level := slog.LevelInfo
 	if !success {
@@ -252,7 +229,6 @@ func (l *Logger) LogAuthAttempt(email string, success bool, reason string) {
 }
 
 // LogAuthzDecision logs an authorization decision (allow/deny).
-// LogAuthzDecision логирует решение авторизации (разрешить/запретить).
 func (l *Logger) LogAuthzDecision(userID int64, resource, action string, allowed bool) {
 	l.Debug("authz decision",
 		slog.Int64("user_id", userID),
@@ -263,9 +239,8 @@ func (l *Logger) LogAuthzDecision(userID int64, resource, action string, allowed
 }
 
 // Fatal logs a fatal error message and exits the application with code 1.
-// Fatal логирует фатальную ошибку и завершает приложение с кодом 1.
 func (l *Logger) Fatal(msg string, args ...any) {
-	// Add caller information / Добавляем информацию о вызывающем
+	// Add caller information
 	_, file, line, _ := runtime.Caller(1)
 	args = append(args, slog.String("caller", file), slog.Int("line", line))
 	l.Error(msg, args...)
@@ -273,43 +248,36 @@ func (l *Logger) Fatal(msg string, args ...any) {
 }
 
 // Global logger instance.
-// Глобальный экземпляр логгера.
 var defaultLogger = NewDefault()
 
 // Default returns the default global logger instance.
-// Default возвращает глобальный экземпляр логгера по умолчанию.
 func Default() *Logger {
 	return defaultLogger
 }
 
 // SetDefault sets the default global logger instance.
-// SetDefault устанавливает глобальный экземпляр логгера по умолчанию.
 func SetDefault(l *Logger) {
 	defaultLogger = l
 }
 
-// Context helper functions / Вспомогательные функции для контекста
+// Context helper functions
 
 // WithRequestIDContext adds a request ID to the context.
-// WithRequestIDContext добавляет ID запроса в контекст.
 func WithRequestIDContext(ctx context.Context, requestID string) context.Context {
 	return context.WithValue(ctx, RequestIDKey, requestID)
 }
 
 // WithUserIDContext adds a user ID to the context.
-// WithUserIDContext добавляет ID пользователя в контекст.
 func WithUserIDContext(ctx context.Context, userID int64) context.Context {
 	return context.WithValue(ctx, UserIDKey, userID)
 }
 
 // WithTraceIDContext adds a trace ID to the context.
-// WithTraceIDContext добавляет ID трассировки в контекст.
 func WithTraceIDContext(ctx context.Context, traceID string) context.Context {
 	return context.WithValue(ctx, TraceIDKey, traceID)
 }
 
 // GetRequestIDFromContext retrieves the request ID from context.
-// GetRequestIDFromContext извлекает ID запроса из контекста.
 func GetRequestIDFromContext(ctx context.Context) string {
 	if v, ok := ctx.Value(RequestIDKey).(string); ok {
 		return v
@@ -318,7 +286,6 @@ func GetRequestIDFromContext(ctx context.Context) string {
 }
 
 // GetUserIDFromContext retrieves the user ID from context.
-// GetUserIDFromContext извлекает ID пользователя из контекста.
 func GetUserIDFromContext(ctx context.Context) int64 {
 	if v, ok := ctx.Value(UserIDKey).(int64); ok {
 		return v

@@ -1,5 +1,4 @@
 // Package handler provides HTTP request handlers for the IAM service.
-// Пакет handler предоставляет обработчики HTTP запросов для IAM сервиса.
 package handler
 
 import (
@@ -9,7 +8,6 @@ import (
 )
 
 // Swagger API documentation metadata.
-// Метаданные документации Swagger API.
 // @title IAM Service API
 // @version 1.0
 // @description Identity and Access Management Service API
@@ -31,31 +29,27 @@ import (
 // @description Type "Bearer" followed by a space and JWT token.
 
 // RegisterSwagger registers Swagger documentation routes.
-// RegisterSwagger регистрирует маршруты документации Swagger.
 //
 // Swagger UI is available at /swagger/index.html.
-// Swagger UI доступен по адресу /swagger/index.html.
 func RegisterSwagger(router *gin.Engine) {
-	// Serve Swagger UI at /swagger/* / Обслуживаем Swagger UI по /swagger/*
+	// Serve Swagger UI at /swagger/*
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler,
-		ginSwagger.URL("/swagger/doc.json"),     // URL to swagger.json / URL к swagger.json
-		ginSwagger.DefaultModelsExpandDepth(-1), // Hide models by default / Скрыть модели по умолчанию
-		ginSwagger.PersistAuthorization(true),   // Remember auth token / Запомнить токен авторизации
+		ginSwagger.URL("/swagger/doc.json"),     // URL to swagger.json
+		ginSwagger.DefaultModelsExpandDepth(-1), // Hide models by default
+		ginSwagger.PersistAuthorization(true),   // Remember auth token
 	))
 }
 
 // SwaggerInfo holds Swagger documentation metadata.
-// SwaggerInfo содержит метаданные документации Swagger.
 type SwaggerInfo struct {
-	Title       string // API title / Название API
-	Description string // API description / Описание API
-	Version     string // API version / Версия API
-	Host        string // API host / Хост API
-	BasePath    string // API base path / Базовый путь API
+	Title       string // API title
+	Description string // API description
+	Version     string // API version
+	Host        string // API host
+	BasePath    string // API base path
 }
 
 // GetSwaggerInfo returns Swagger documentation info.
-// GetSwaggerInfo возвращает информацию о документации Swagger.
 func GetSwaggerInfo() SwaggerInfo {
 	return SwaggerInfo{
 		Title:       "IAM Service API",

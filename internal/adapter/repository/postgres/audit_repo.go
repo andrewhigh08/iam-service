@@ -1,5 +1,4 @@
 // Package postgres provides PostgreSQL-based repository implementations.
-// Пакет postgres предоставляет реализации репозиториев на базе PostgreSQL.
 package postgres
 
 import (
@@ -12,30 +11,24 @@ import (
 )
 
 // AuditLogRepository implements port.AuditLogRepository using PostgreSQL.
-// AuditLogRepository реализует интерфейс port.AuditLogRepository с использованием PostgreSQL.
 //
 // Stores audit log entries for security, compliance, and debugging purposes.
-// Хранит записи аудит-лога для безопасности, соответствия требованиям и отладки.
 type AuditLogRepository struct {
-	db *gorm.DB // Database connection / Подключение к базе данных
+	db *gorm.DB // Database connection
 }
 
 // NewAuditLogRepository creates a new AuditLogRepository instance.
-// NewAuditLogRepository создаёт новый экземпляр AuditLogRepository.
 func NewAuditLogRepository(db *gorm.DB) *AuditLogRepository {
 	return &AuditLogRepository{db: db}
 }
 
 // Create creates a new audit log entry in the database.
-// Create создаёт новую запись аудит-лога в базе данных.
 func (r *AuditLogRepository) Create(ctx context.Context, log *domain.AuditLog) error {
 	return r.CreateTx(ctx, r.db, log)
 }
 
 // CreateTx creates a new audit log entry within an existing transaction.
-// CreateTx создаёт новую запись аудит-лога в рамках существующей транзакции.
 // Use this when logging must be part of a larger atomic operation.
-// Используйте, когда логирование должно быть частью большой атомарной операции.
 func (r *AuditLogRepository) CreateTx(ctx context.Context, tx *gorm.DB, log *domain.AuditLog) error {
 	if err := tx.WithContext(ctx).Create(log).Error; err != nil {
 		return apperror.Internal("failed to create audit log", err)
@@ -44,9 +37,7 @@ func (r *AuditLogRepository) CreateTx(ctx context.Context, tx *gorm.DB, log *dom
 }
 
 // FindByUserID retrieves audit logs for a specific user.
-// FindByUserID получает записи аудит-лога для конкретного пользователя.
 // Results are ordered by creation time (newest first) and limited.
-// Результаты отсортированы по времени создания (сначала новые) и ограничены.
 func (r *AuditLogRepository) FindByUserID(ctx context.Context, userID int64, limit int) ([]domain.AuditLog, error) {
 	var logs []domain.AuditLog
 
@@ -63,9 +54,7 @@ func (r *AuditLogRepository) FindByUserID(ctx context.Context, userID int64, lim
 }
 
 // FindByResourceID retrieves audit logs for a specific resource.
-// FindByResourceID получает записи аудит-лога для конкретного ресурса.
 // Useful for tracking all actions performed on a particular entity.
-// Полезно для отслеживания всех действий, выполненных над конкретной сущностью.
 func (r *AuditLogRepository) FindByResourceID(ctx context.Context, resourceType, resourceID string, limit int) ([]domain.AuditLog, error) {
 	var logs []domain.AuditLog
 

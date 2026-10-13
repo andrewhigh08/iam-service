@@ -1,10 +1,7 @@
 // Package service contains the business logic layer of the application.
-// Пакет service содержит слой бизнес-логики приложения.
 //
 // Services implement the business rules and orchestrate operations
 // between repositories and other components.
-// Сервисы реализуют бизнес-правила и координируют операции
-// между репозиториями и другими компонентами.
 package service
 
 import (
@@ -28,61 +25,54 @@ import (
 )
 
 // AuthService implements port.AuthService interface.
-// AuthService реализует интерфейс port.AuthService.
 //
 // Provides authentication operations including login, token validation,
 // and password management using JWT RS256 signing.
-// Предоставляет операции аутентификации, включая вход, валидацию токенов
-// и управление паролями с использованием подписи JWT RS256.
 type AuthService struct {
-	userRepo         port.UserRepository       // User repository / Репозиторий пользователей
-	authz            port.AuthorizationService // Authorization service for roles / Сервис авторизации для ролей
-	auditService     port.AuditService         // Audit service for logging / Сервис аудита для логирования
-	refreshCache     port.RefreshTokenCache    // Refresh token cache / Кэш refresh токенов
-	tokenCache       port.TokenCache           // Token blacklist cache / Кэш черного списка токенов
-	rateLimitCache   port.RateLimitCache       // Rate limit cache for login attempts / Кэш ограничений для попыток входа
-	privateKey       *rsa.PrivateKey           // RSA private key for signing / Приватный RSA ключ для подписи
-	publicKey        *rsa.PublicKey            // RSA public key for verification / Публичный RSA ключ для проверки
-	tokenTTL         time.Duration             // Access token time-to-live / Время жизни access токена
-	refreshTTL       time.Duration             // Refresh token time-to-live / Время жизни refresh токена
-	maxLoginAttempts int                       // Max failed login attempts before lockout / Макс. неудачных попыток до блокировки
-	lockoutDuration  time.Duration             // Duration of account lockout / Длительность блокировки аккаунта
-	passwordMaxAge   time.Duration             // Max password age (0 = no expiration) / Макс. срок действия пароля (0 = без ограничения)
-	logger           *logger.Logger            // Logger instance / Экземпляр логгера
+	userRepo         port.UserRepository       // User repository
+	authz            port.AuthorizationService // Authorization service for roles
+	auditService     port.AuditService         // Audit service for logging
+	refreshCache     port.RefreshTokenCache    // Refresh token cache
+	tokenCache       port.TokenCache           // Token blacklist cache
+	rateLimitCache   port.RateLimitCache       // Rate limit cache for login attempts
+	privateKey       *rsa.PrivateKey           // RSA private key for signing
+	publicKey        *rsa.PublicKey            // RSA public key for verification
+	tokenTTL         time.Duration             // Access token time-to-live
+	refreshTTL       time.Duration             // Refresh token time-to-live
+	maxLoginAttempts int                       // Max failed login attempts before lockout
+	lockoutDuration  time.Duration             // Duration of account lockout
+	passwordMaxAge   time.Duration             // Max password age (0 = no expiration)
+	logger           *logger.Logger            // Logger instance
 }
 
 // AuthServiceConfig holds configuration for AuthService.
-// AuthServiceConfig содержит конфигурацию для AuthService.
 type AuthServiceConfig struct {
-	PrivateKeyPath   string        // Path to RSA private key PEM file / Путь к файлу приватного RSA ключа
-	PublicKeyPath    string        // Path to RSA public key PEM file / Путь к файлу публичного RSA ключа
-	TokenTTL         time.Duration // Access token TTL / TTL access токена
-	RefreshTTL       time.Duration // Refresh token TTL / TTL refresh токена
-	MaxLoginAttempts int           // Max failed login attempts before lockout / Макс. неудачных попыток до блокировки
-	LockoutDuration  time.Duration // Duration of account lockout / Длительность блокировки аккаунта
-	PasswordMaxAge   time.Duration // Max password age (0 = no expiration) / Макс. срок действия пароля (0 = без ограничения)
-	DevMode          bool          // If true, generate keys if files don't exist / Генерировать ключи, если файлы не существуют
+	PrivateKeyPath   string        // Path to RSA private key PEM file
+	PublicKeyPath    string        // Path to RSA public key PEM file
+	TokenTTL         time.Duration // Access token TTL
+	RefreshTTL       time.Duration // Refresh token TTL
+	MaxLoginAttempts int           // Max failed login attempts before lockout
+	LockoutDuration  time.Duration // Duration of account lockout
+	PasswordMaxAge   time.Duration // Max password age (0 = no expiration)
+	DevMode          bool          // If true, generate keys if files don't exist
 }
 
 // DefaultAuthServiceConfig returns default configuration.
-// DefaultAuthServiceConfig возвращает конфигурацию по умолчанию.
 func DefaultAuthServiceConfig() AuthServiceConfig {
 	return AuthServiceConfig{
 		PrivateKeyPath:   "configs/keys/private.pem",
 		PublicKeyPath:    "configs/keys/public.pem",
-		TokenTTL:         15 * time.Minute,    // 15 minutes / 15 минут
-		RefreshTTL:       7 * 24 * time.Hour,  // 7 days / 7 дней
-		MaxLoginAttempts: 5,                   // 5 attempts / 5 попыток
-		LockoutDuration:  15 * time.Minute,    // 15 minutes / 15 минут
-		PasswordMaxAge:   90 * 24 * time.Hour, // 90 days / 90 дней
+		TokenTTL:         15 * time.Minute,    // 15 minutes
+		RefreshTTL:       7 * 24 * time.Hour,  // 7 days
+		MaxLoginAttempts: 5,                   // 5 attempts
+		LockoutDuration:  15 * time.Minute,    // 15 minutes
+		PasswordMaxAge:   90 * 24 * time.Hour, // 90 days
 		DevMode:          true,
 	}
 }
 
 // NewAuthService creates a new AuthService instance.
-// NewAuthService создаёт новый экземпляр AuthService.
 // Loads RSA key pair from PEM files, or generates them in dev mode.
-// Загружает пару RSA ключей из PEM файлов или генерирует их в режиме разработки.
 func NewAuthService(
 	userRepo port.UserRepository,
 	authz port.AuthorizationService,
@@ -98,19 +88,19 @@ func NewAuthService(
 	var privateKey *rsa.PrivateKey
 	var publicKey *rsa.PublicKey
 
-	// Try to load keys from files / Пытаемся загрузить ключи из файлов
+	// Try to load keys from files
 	privateKey, err := loadRSAPrivateKey(config.PrivateKeyPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			return nil, apperror.Internal("failed to load RSA private key", err)
 		}
 
-		// Key file doesn't exist / Файл ключа не существует
+		// Key file doesn't exist
 		if !config.DevMode {
 			return nil, apperror.Internal("RSA key files not found and DevMode is disabled", err)
 		}
 
-		// Generate and save keys in dev mode / Генерируем и сохраняем ключи в режиме разработки
+		// Generate and save keys in dev mode
 		componentLog.Info("RSA key files not found, generating new keys (dev mode)")
 		privateKey, err = generateAndSaveKeys(config.PrivateKeyPath, config.PublicKeyPath)
 		if err != nil {
@@ -118,7 +108,7 @@ func NewAuthService(
 		}
 		publicKey = &privateKey.PublicKey
 	} else {
-		// Load public key / Загружаем публичный ключ
+		// Load public key
 		publicKey, err = loadRSAPublicKey(config.PublicKeyPath)
 		if err != nil {
 			return nil, apperror.Internal("failed to load RSA public key", err)
@@ -127,25 +117,22 @@ func NewAuthService(
 	}
 
 	// Set default refresh TTL if not specified
-	// Устанавливаем default TTL refresh токена, если не указано
 	refreshTTL := config.RefreshTTL
 	if refreshTTL == 0 {
-		refreshTTL = 7 * 24 * time.Hour // 7 days / 7 дней
+		refreshTTL = 7 * 24 * time.Hour // 7 days
 	}
 
 	// Set default lockout config if not specified
-	// Устанавливаем default конфиг блокировки, если не указано
 	maxLoginAttempts := config.MaxLoginAttempts
 	if maxLoginAttempts == 0 {
-		maxLoginAttempts = 5 // Default 5 attempts / По умолчанию 5 попыток
+		maxLoginAttempts = 5 // Default 5 attempts
 	}
 	lockoutDuration := config.LockoutDuration
 	if lockoutDuration == 0 {
-		lockoutDuration = 15 * time.Minute // Default 15 minutes / По умолчанию 15 минут
+		lockoutDuration = 15 * time.Minute // Default 15 minutes
 	}
 
 	// Password max age (0 means no expiration)
-	// Макс. срок действия пароля (0 означает без ограничения)
 	passwordMaxAge := config.PasswordMaxAge
 
 	return &AuthService{
@@ -167,7 +154,6 @@ func NewAuthService(
 }
 
 // loadRSAPrivateKey loads an RSA private key from a PEM file.
-// loadRSAPrivateKey загружает приватный RSA ключ из PEM файла.
 func loadRSAPrivateKey(path string) (*rsa.PrivateKey, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -179,10 +165,10 @@ func loadRSAPrivateKey(path string) (*rsa.PrivateKey, error) {
 		return nil, apperror.Internal(fmt.Sprintf("failed to decode PEM block from %s", path), nil)
 	}
 
-	// Try PKCS#8 first, then PKCS#1 / Сначала пробуем PKCS#8, потом PKCS#1
+	// Try PKCS#8 first, then PKCS#1
 	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
-		// Fallback to PKCS#1 / Запасной вариант - PKCS#1
+		// Fallback to PKCS#1
 		pkcs1Key, pkcs1Err := x509.ParsePKCS1PrivateKey(block.Bytes)
 		if pkcs1Err != nil {
 			return nil, apperror.Internal("failed to parse private key", pkcs1Err)
@@ -198,7 +184,6 @@ func loadRSAPrivateKey(path string) (*rsa.PrivateKey, error) {
 }
 
 // loadRSAPublicKey loads an RSA public key from a PEM file.
-// loadRSAPublicKey загружает публичный RSA ключ из PEM файла.
 func loadRSAPublicKey(path string) (*rsa.PublicKey, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -210,10 +195,10 @@ func loadRSAPublicKey(path string) (*rsa.PublicKey, error) {
 		return nil, apperror.Internal(fmt.Sprintf("failed to decode PEM block from %s", path), nil)
 	}
 
-	// Try PKIX first, then PKCS#1 / Сначала пробуем PKIX, потом PKCS#1
+	// Try PKIX first, then PKCS#1
 	key, err := x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
-		// Fallback to PKCS#1 / Запасной вариант - PKCS#1
+		// Fallback to PKCS#1
 		pkcs1Key, pkcs1Err := x509.ParsePKCS1PublicKey(block.Bytes)
 		if pkcs1Err != nil {
 			return nil, apperror.Internal("failed to parse public key", pkcs1Err)
@@ -229,21 +214,20 @@ func loadRSAPublicKey(path string) (*rsa.PublicKey, error) {
 }
 
 // generateAndSaveKeys generates RSA key pair and saves to PEM files.
-// generateAndSaveKeys генерирует пару RSA ключей и сохраняет в PEM файлы.
 func generateAndSaveKeys(privatePath, publicPath string) (*rsa.PrivateKey, error) {
-	// Generate key pair / Генерируем пару ключей
+	// Generate key pair
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate RSA key: %w", err)
 	}
 
-	// Ensure directory exists / Убеждаемся, что директория существует
+	// Ensure directory exists
 	err = os.MkdirAll(filepath.Dir(privatePath), 0o750)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create key directory: %w", err)
 	}
 
-	// Save private key / Сохраняем приватный ключ
+	// Save private key
 	privateKeyBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal private key: %w", err)
@@ -257,7 +241,7 @@ func generateAndSaveKeys(privatePath, publicPath string) (*rsa.PrivateKey, error
 		return nil, fmt.Errorf("failed to write private key: %w", err)
 	}
 
-	// Save public key / Сохраняем публичный ключ
+	// Save public key
 	publicKeyBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal public key: %w", err)
@@ -276,15 +260,12 @@ func generateAndSaveKeys(privatePath, publicPath string) (*rsa.PrivateKey, error
 }
 
 // Login authenticates a user and returns a JWT token pair.
-// Login аутентифицирует пользователя и возвращает пару JWT токенов.
 //
 // Returns: token pair, isOTP (true if one-time password), error.
-// Возвращает: пару токенов, isOTP (true если одноразовый пароль), ошибку.
 func (s *AuthService) Login(ctx context.Context, email, password string) (tokens *port.TokenPair, isOTP bool, err error) {
 	log := s.logger.WithContext(ctx)
 
 	// Check if account is locked due to too many failed attempts
-	// Проверяем, заблокирован ли аккаунт из-за множества неудачных попыток
 	lockoutKey := s.getLockoutKey(email)
 	if locked, lockErr := s.isAccountLocked(ctx, lockoutKey); lockErr != nil {
 		log.Warn("failed to check account lockout", "email", email, "error", lockErr)
@@ -297,11 +278,10 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (tokens
 		return nil, false, apperror.Unauthorized("account is temporarily locked due to too many failed login attempts")
 	}
 
-	// Find user by email / Ищем пользователя по email
+	// Find user by email
 	user, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil {
 		// Increment failed attempts even for non-existent users to prevent enumeration
-		// Увеличиваем счётчик неудачных попыток даже для несуществующих пользователей
 		s.recordFailedLoginAttempt(ctx, lockoutKey, email)
 		log.LogAuthAttempt(email, false, "user not found")
 		// Audit log: failed login (user not found)
@@ -309,11 +289,10 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (tokens
 			"reason": "user_not_found",
 		})
 		// Return generic error to prevent user enumeration
-		// Возвращаем общую ошибку для предотвращения перебора пользователей
 		return nil, false, apperror.Unauthorized("invalid credentials")
 	}
 
-	// Check if user is blocked / Проверяем, заблокирован ли пользователь
+	// Check if user is blocked
 	if user.IsBlocked {
 		log.LogAuthAttempt(email, false, "user blocked")
 		// Audit log: failed login (user blocked)
@@ -323,7 +302,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (tokens
 		return nil, false, apperror.Unauthorized("user is blocked")
 	}
 
-	// Verify password / Проверяем пароль
+	// Verify password
 	if bcryptErr := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); bcryptErr != nil {
 		s.recordFailedLoginAttempt(ctx, lockoutKey, email)
 		log.LogAuthAttempt(email, false, "invalid password")
@@ -335,12 +314,11 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (tokens
 	}
 
 	// Reset failed login attempts on successful authentication
-	// Сбрасываем счётчик неудачных попыток при успешной аутентификации
 	if resetErr := s.rateLimitCache.Reset(ctx, lockoutKey); resetErr != nil {
 		log.Warn("failed to reset login attempts counter", "email", email, "error", resetErr)
 	}
 
-	// Check for one-time password / Проверяем одноразовый пароль
+	// Check for one-time password
 	if user.PasswordType == domain.PasswordTypeOneTime {
 		log.LogAuthAttempt(email, true, "OTP login - password change required")
 		// Audit log: OTP login success (requires password change)
@@ -348,10 +326,10 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (tokens
 			"otp_login":                true,
 			"requires_password_change": true,
 		})
-		return nil, true, nil // Require password change / Требуется смена пароля
+		return nil, true, nil // Require password change
 	}
 
-	// Check for password expiration / Проверяем срок действия пароля
+	// Check for password expiration
 	if s.isPasswordExpired(user) {
 		log.LogAuthAttempt(email, true, "password expired - password change required")
 		// Audit log: password expired
@@ -362,14 +340,14 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (tokens
 		return nil, false, apperror.PasswordExpired(user.ID)
 	}
 
-	// Get user roles / Получаем роли пользователя
+	// Get user roles
 	roles, err := s.authz.GetUserRoles(ctx, user.ID)
 	if err != nil {
 		log.Error("failed to fetch user roles", "user_id", user.ID, "error", err)
 		return nil, false, apperror.Internal("failed to fetch user permissions", err)
 	}
 
-	// Generate token pair / Генерируем пару токенов
+	// Generate token pair
 	tokens, err = s.generateTokenPair(ctx, user, roles)
 	if err != nil {
 		log.Error("failed to generate tokens", "user_id", user.ID, "error", err)
@@ -386,13 +364,11 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (tokens
 }
 
 // getLockoutKey generates a cache key for login attempt tracking.
-// getLockoutKey генерирует ключ кэша для отслеживания попыток входа.
 func (s *AuthService) getLockoutKey(email string) string {
 	return "login_attempts:" + email
 }
 
 // isAccountLocked checks if an account is locked due to too many failed attempts.
-// isAccountLocked проверяет, заблокирован ли аккаунт из-за множества неудачных попыток.
 func (s *AuthService) isAccountLocked(ctx context.Context, lockoutKey string) (bool, error) {
 	count, err := s.rateLimitCache.GetCount(ctx, lockoutKey)
 	if err != nil {
@@ -402,7 +378,6 @@ func (s *AuthService) isAccountLocked(ctx context.Context, lockoutKey string) (b
 }
 
 // recordFailedLoginAttempt increments the failed login attempt counter.
-// recordFailedLoginAttempt увеличивает счётчик неудачных попыток входа.
 func (s *AuthService) recordFailedLoginAttempt(ctx context.Context, lockoutKey, email string) {
 	log := s.logger.WithContext(ctx)
 	count, err := s.rateLimitCache.Increment(ctx, lockoutKey, s.lockoutDuration)
@@ -416,27 +391,22 @@ func (s *AuthService) recordFailedLoginAttempt(ctx context.Context, lockoutKey, 
 }
 
 // isPasswordExpired checks if the user's password has expired.
-// isPasswordExpired проверяет, истёк ли срок действия пароля пользователя.
 func (s *AuthService) isPasswordExpired(user *domain.User) bool {
 	// If password max age is not set (0), passwords never expire
-	// Если максимальный срок не установлен (0), пароли никогда не истекают
 	if s.passwordMaxAge == 0 {
 		return false
 	}
 
 	// If password changed at is not set, consider it expired (forces password change)
-	// Если дата смены пароля не установлена, считаем его истёкшим (требует смены пароля)
 	if user.PasswordChangedAt == nil {
 		return true
 	}
 
 	// Check if password has exceeded max age
-	// Проверяем, превысил ли пароль максимальный срок действия
 	return time.Since(*user.PasswordChangedAt) > s.passwordMaxAge
 }
 
 // logAuditEvent logs an authentication event to the audit log.
-// logAuditEvent записывает событие аутентификации в аудит-лог.
 func (s *AuthService) logAuditEvent(ctx context.Context, userID int64, action, resourceID string, details map[string]interface{}) {
 	if s.auditService == nil {
 		return
@@ -447,10 +417,9 @@ func (s *AuthService) logAuditEvent(ctx context.Context, userID int64, action, r
 }
 
 // ValidateToken validates a JWT token and returns the claims.
-// ValidateToken проверяет JWT токен и возвращает claims.
 func (s *AuthService) ValidateToken(_ context.Context, tokenString string) (*port.Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &port.Claims{}, func(token *jwt.Token) (interface{}, error) {
-		// Verify signing method / Проверяем метод подписи
+		// Verify signing method
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
@@ -470,31 +439,29 @@ func (s *AuthService) ValidateToken(_ context.Context, tokenString string) (*por
 }
 
 // ChangePassword changes the password for an authenticated user.
-// ChangePassword меняет пароль для аутентифицированного пользователя.
 // Requires the old password for verification.
-// Требует старый пароль для верификации.
 func (s *AuthService) ChangePassword(ctx context.Context, userID int64, oldPassword, newPassword string) error {
 	log := s.logger.WithContext(ctx)
 
-	// Find user / Находим пользователя
+	// Find user
 	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		return err
 	}
 
-	// Verify old password / Проверяем старый пароль
+	// Verify old password
 	if bcryptErr := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(oldPassword)); bcryptErr != nil {
 		return apperror.Unauthorized("invalid old password")
 	}
 
-	// Hash new password / Хэшируем новый пароль
+	// Hash new password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		log.Error("failed to hash password", "error", err)
 		return apperror.Internal("failed to hash password", err)
 	}
 
-	// Update user / Обновляем пользователя
+	// Update user
 	now := time.Now()
 	user.PasswordHash = string(hashedPassword)
 	user.PasswordType = domain.PasswordTypePermanent
@@ -516,42 +483,39 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID int64, oldPassw
 }
 
 // FirstTimePasswordChange changes the OTP password to a permanent one.
-// FirstTimePasswordChange меняет OTP пароль на постоянный.
 // Must be called when user logs in with one-time password.
-// Должен вызываться, когда пользователь входит с одноразовым паролем.
 func (s *AuthService) FirstTimePasswordChange(ctx context.Context, userID int64, oldPassword, newPassword string) error {
 	log := s.logger.WithContext(ctx)
 
-	// Find user / Находим пользователя
+	// Find user
 	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		return err
 	}
 
 	// Verify this is actually a one-time password
-	// Проверяем, что это действительно одноразовый пароль
 	if user.PasswordType != domain.PasswordTypeOneTime {
 		return apperror.BadRequest("this endpoint is only for one-time password changes")
 	}
 
-	// Check if user is blocked / Проверяем, заблокирован ли пользователь
+	// Check if user is blocked
 	if user.IsBlocked {
 		return apperror.Unauthorized("user is blocked")
 	}
 
-	// Verify old password / Проверяем старый пароль
+	// Verify old password
 	if bcryptErr := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(oldPassword)); bcryptErr != nil {
 		return apperror.Unauthorized("invalid old password")
 	}
 
-	// Hash new password / Хэшируем новый пароль
+	// Hash new password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		log.Error("failed to hash password", "error", err)
 		return apperror.Internal("failed to hash password", err)
 	}
 
-	// Update user / Обновляем пользователя
+	// Update user
 	now := time.Now()
 	user.PasswordHash = string(hashedPassword)
 	user.PasswordType = domain.PasswordTypePermanent
@@ -574,18 +538,15 @@ func (s *AuthService) FirstTimePasswordChange(ctx context.Context, userID int64,
 }
 
 // GetPublicKey returns the RSA public key for external token verification.
-// GetPublicKey возвращает публичный RSA ключ для внешней проверки токенов.
 func (s *AuthService) GetPublicKey() interface{} {
 	return s.publicKey
 }
 
 // generateAccessToken generates a JWT access token for a user.
-// generateAccessToken генерирует JWT access токен для пользователя.
 func (s *AuthService) generateAccessToken(user *domain.User, roles []string) (string, error) {
 	now := time.Now()
 
 	// Generate unique JWT ID for blacklist support
-	// Генерируем уникальный JWT ID для поддержки blacklist
 	jti, err := s.generateJTI()
 	if err != nil {
 		return "", fmt.Errorf("failed to generate JTI: %w", err)
@@ -608,7 +569,6 @@ func (s *AuthService) generateAccessToken(user *domain.User, roles []string) (st
 }
 
 // generateJTI generates a unique JWT ID.
-// generateJTI генерирует уникальный JWT ID.
 func (s *AuthService) generateJTI() (string, error) {
 	bytes := make([]byte, 16)
 	if _, err := rand.Read(bytes); err != nil {
@@ -618,7 +578,6 @@ func (s *AuthService) generateJTI() (string, error) {
 }
 
 // generateRefreshToken generates a secure refresh token.
-// generateRefreshToken генерирует безопасный refresh токен.
 func (s *AuthService) generateRefreshToken() (string, error) {
 	bytes := make([]byte, 32)
 	if _, err := rand.Read(bytes); err != nil {
@@ -628,21 +587,20 @@ func (s *AuthService) generateRefreshToken() (string, error) {
 }
 
 // generateTokenPair generates both access and refresh tokens.
-// generateTokenPair генерирует access и refresh токены.
 func (s *AuthService) generateTokenPair(ctx context.Context, user *domain.User, roles []string) (*port.TokenPair, error) {
-	// Generate access token / Генерируем access токен
+	// Generate access token
 	accessToken, err := s.generateAccessToken(user, roles)
 	if err != nil {
 		return nil, err
 	}
 
-	// Generate refresh token / Генерируем refresh токен
+	// Generate refresh token
 	refreshToken, err := s.generateRefreshToken()
 	if err != nil {
 		return nil, err
 	}
 
-	// Store refresh token in cache / Сохраняем refresh токен в кэше
+	// Store refresh token in cache
 	if err := s.refreshCache.StoreRefreshToken(ctx, refreshToken, user.ID, s.refreshTTL); err != nil {
 		return nil, fmt.Errorf("failed to store refresh token: %w", err)
 	}
@@ -654,40 +612,39 @@ func (s *AuthService) generateTokenPair(ctx context.Context, user *domain.User, 
 }
 
 // RefreshToken validates refresh token and returns new access token.
-// RefreshToken проверяет refresh токен и возвращает новый access токен.
 func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (string, error) {
 	log := s.logger.WithContext(ctx)
 
-	// Get user ID from refresh token / Получаем ID пользователя из refresh токена
+	// Get user ID from refresh token
 	userID, err := s.refreshCache.GetRefreshToken(ctx, refreshToken)
 	if err != nil {
 		log.Warn("refresh token not found or expired", "error", err)
 		return "", apperror.Unauthorized("invalid or expired refresh token")
 	}
 
-	// Get user / Получаем пользователя
+	// Get user
 	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		log.Error("user not found for refresh token", "user_id", userID, "error", err)
 		return "", apperror.Unauthorized("user not found")
 	}
 
-	// Check if user is blocked / Проверяем, заблокирован ли пользователь
+	// Check if user is blocked
 	if user.IsBlocked {
 		log.Warn("blocked user tried to refresh token", "user_id", userID)
-		// Invalidate refresh token / Инвалидируем refresh токен
+		// Invalidate refresh token
 		_ = s.refreshCache.DeleteRefreshToken(ctx, refreshToken)
 		return "", apperror.Unauthorized("user is blocked")
 	}
 
-	// Get user roles / Получаем роли пользователя
+	// Get user roles
 	roles, err := s.authz.GetUserRoles(ctx, userID)
 	if err != nil {
 		log.Error("failed to fetch user roles", "user_id", userID, "error", err)
 		return "", apperror.Internal("failed to fetch user permissions", err)
 	}
 
-	// Generate new access token / Генерируем новый access токен
+	// Generate new access token
 	accessToken, err := s.generateAccessToken(user, roles)
 	if err != nil {
 		log.Error("failed to generate access token", "user_id", userID, "error", err)
@@ -699,25 +656,23 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (st
 }
 
 // Logout invalidates a refresh token and optionally blacklists an access token.
-// Logout инвалидирует refresh токен и опционально добавляет access токен в blacklist.
 func (s *AuthService) Logout(ctx context.Context, refreshToken, accessToken string) error {
 	log := s.logger.WithContext(ctx)
 
 	// Get userID from refresh token before deleting (for audit log)
-	// Получаем userID из refresh токена перед удалением (для аудит-лога)
 	userID, _ := s.refreshCache.GetRefreshToken(ctx, refreshToken)
 
-	// Delete refresh token / Удаляем refresh токен
+	// Delete refresh token
 	if err := s.refreshCache.DeleteRefreshToken(ctx, refreshToken); err != nil {
 		log.Error("failed to delete refresh token", "error", err)
 		return apperror.Internal("failed to logout", err)
 	}
 
-	// Blacklist access token if provided / Добавляем access токен в blacklist, если предоставлен
+	// Blacklist access token if provided
 	if accessToken != "" {
 		if err := s.blacklistAccessToken(ctx, accessToken); err != nil {
 			log.Warn("failed to blacklist access token", "error", err)
-			// Don't fail logout if blacklisting fails / Не прерываем logout если blacklist не удался
+			// Don't fail logout if blacklisting fails
 		}
 	}
 
@@ -731,53 +686,50 @@ func (s *AuthService) Logout(ctx context.Context, refreshToken, accessToken stri
 }
 
 // blacklistAccessToken adds an access token to the blacklist.
-// blacklistAccessToken добавляет access токен в чёрный список.
 func (s *AuthService) blacklistAccessToken(ctx context.Context, tokenString string) error {
-	// Parse token to get JTI and expiration / Парсим токен для получения JTI и времени истечения
+	// Parse token to get JTI and expiration
 	claims, err := s.ValidateToken(ctx, tokenString)
 	if err != nil {
 		return fmt.Errorf("failed to parse token for blacklisting: %w", err)
 	}
 
-	// Get JTI from claims / Получаем JTI из claims
+	// Get JTI from claims
 	if claims.ID == "" {
 		return apperror.BadRequest("token has no JTI, cannot blacklist")
 	}
 
-	// Calculate remaining TTL / Вычисляем оставшееся время жизни
+	// Calculate remaining TTL
 	var ttl time.Duration
 	if claims.ExpiresAt != nil {
 		ttl = time.Until(claims.ExpiresAt.Time)
 		if ttl <= 0 {
 			// Token already expired, no need to blacklist
-			// Токен уже истёк, нет необходимости добавлять в blacklist
 			return nil
 		}
 	} else {
-		// No expiration, use default token TTL / Нет времени истечения, используем TTL по умолчанию
+		// No expiration, use default token TTL
 		ttl = s.tokenTTL
 	}
 
-	// Add to blacklist / Добавляем в blacklist
+	// Add to blacklist
 	return s.tokenCache.BlacklistToken(ctx, claims.ID, ttl)
 }
 
 // LogoutAll invalidates all refresh tokens for a user and blacklists current access token.
-// LogoutAll инвалидирует все refresh токены пользователя и добавляет текущий access токен в blacklist.
 func (s *AuthService) LogoutAll(ctx context.Context, userID int64, accessToken string) error {
 	log := s.logger.WithContext(ctx)
 
-	// Delete all refresh tokens / Удаляем все refresh токены
+	// Delete all refresh tokens
 	if err := s.refreshCache.DeleteUserRefreshTokens(ctx, userID); err != nil {
 		log.Error("failed to delete user refresh tokens", "user_id", userID, "error", err)
 		return apperror.Internal("failed to logout from all devices", err)
 	}
 
-	// Blacklist current access token if provided / Добавляем текущий access токен в blacklist
+	// Blacklist current access token if provided
 	if accessToken != "" {
 		if err := s.blacklistAccessToken(ctx, accessToken); err != nil {
 			log.Warn("failed to blacklist access token", "error", err)
-			// Don't fail logout if blacklisting fails / Не прерываем logout если blacklist не удался
+			// Don't fail logout if blacklisting fails
 		}
 	}
 
@@ -791,15 +743,12 @@ func (s *AuthService) LogoutAll(ctx context.Context, userID int64, accessToken s
 }
 
 // IsTokenBlacklisted checks if a token is in the blacklist.
-// IsTokenBlacklisted проверяет, находится ли токен в чёрном списке.
 func (s *AuthService) IsTokenBlacklisted(ctx context.Context, jti string) (bool, error) {
 	return s.tokenCache.IsBlacklisted(ctx, jti)
 }
 
 // GenerateTokenForUser generates a token pair for a user by ID.
-// GenerateTokenForUser генерирует пару токенов для пользователя по ID.
 // Used after first-time password change.
-// Используется после первой смены пароля.
 func (s *AuthService) GenerateTokenForUser(ctx context.Context, userID int64) (*port.TokenPair, error) {
 	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
@@ -815,22 +764,17 @@ func (s *AuthService) GenerateTokenForUser(ctx context.Context, userID int64) (*
 }
 
 // GetUserByEmail retrieves a user by email.
-// GetUserByEmail получает пользователя по email.
 // Used for OTP flow.
-// Используется для потока OTP.
 func (s *AuthService) GetUserByEmail(ctx context.Context, email string) (*domain.User, error) {
 	return s.userRepo.FindByEmail(ctx, email)
 }
 
 // GetUserSessions retrieves all active sessions for a user.
-// GetUserSessions получает все активные сессии пользователя.
 // Returns a list of sessions with their metadata.
-// Возвращает список сессий с их метаданными.
 func (s *AuthService) GetUserSessions(ctx context.Context, userID int64, currentTokenID string) ([]domain.Session, error) {
 	log := s.logger.WithContext(ctx)
 
 	// Get all refresh tokens for the user with their TTLs
-	// Получаем все refresh токены пользователя с их TTL
 	tokens, err := s.refreshCache.GetUserTokens(ctx, userID)
 	if err != nil {
 		log.Error("failed to get user tokens", "user_id", userID, "error", err)
@@ -843,11 +787,10 @@ func (s *AuthService) GetUserSessions(ctx context.Context, userID int64, current
 	for tokenID, ttlSeconds := range tokens {
 		expiresAt := now.Add(time.Duration(ttlSeconds) * time.Second)
 		// Approximate creation time based on refresh TTL and remaining TTL
-		// Приблизительное время создания на основе TTL refresh токена и оставшегося TTL
 		createdAt := expiresAt.Add(-s.refreshTTL)
 
 		session := domain.Session{
-			ID:        tokenID[:8], // Short ID for display / Короткий ID для отображения
+			ID:        tokenID[:8], // Short ID for display
 			TokenID:   tokenID,
 			CreatedAt: createdAt,
 			ExpiresAt: expiresAt,
@@ -861,12 +804,10 @@ func (s *AuthService) GetUserSessions(ctx context.Context, userID int64, current
 }
 
 // RevokeSession revokes a specific session by its token ID.
-// RevokeSession отзывает конкретную сессию по её token ID.
 func (s *AuthService) RevokeSession(ctx context.Context, userID int64, tokenID string) error {
 	log := s.logger.WithContext(ctx)
 
 	// Verify the token belongs to this user
-	// Проверяем, что токен принадлежит этому пользователю
 	tokenUserID, err := s.refreshCache.GetRefreshToken(ctx, tokenID)
 	if err != nil {
 		log.Warn("session not found for revocation", "user_id", userID, "token_id", tokenID[:8])
@@ -879,7 +820,6 @@ func (s *AuthService) RevokeSession(ctx context.Context, userID int64, tokenID s
 	}
 
 	// Delete the refresh token
-	// Удаляем refresh токен
 	if err := s.refreshCache.DeleteRefreshToken(ctx, tokenID); err != nil {
 		log.Error("failed to revoke session", "user_id", userID, "token_id", tokenID[:8], "error", err)
 		return apperror.Internal("failed to revoke session", err)

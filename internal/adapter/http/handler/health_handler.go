@@ -1,5 +1,4 @@
 // Package handler provides HTTP request handlers for the IAM service.
-// Пакет handler предоставляет обработчики HTTP запросов для IAM сервиса.
 package handler
 
 import (
@@ -15,17 +14,14 @@ import (
 )
 
 // HealthHandler handles health check endpoints.
-// HealthHandler обрабатывает эндпоинты проверки здоровья.
 //
 // Provides liveness and readiness probes for Kubernetes.
-// Предоставляет liveness и readiness пробы для Kubernetes.
 type HealthHandler struct {
-	db    *gorm.DB      // Database connection / Подключение к БД
-	redis *redis.Client // Redis connection / Подключение к Redis
+	db    *gorm.DB      // Database connection
+	redis *redis.Client // Redis connection
 }
 
 // NewHealthHandler creates a new HealthHandler instance.
-// NewHealthHandler создаёт новый экземпляр HealthHandler.
 func NewHealthHandler(db *gorm.DB, redis *redis.Client) *HealthHandler {
 	return &HealthHandler{
 		db:    db,
@@ -34,25 +30,21 @@ func NewHealthHandler(db *gorm.DB, redis *redis.Client) *HealthHandler {
 }
 
 // HealthStatus represents the health status response.
-// HealthStatus представляет ответ о состоянии здоровья.
 type HealthStatus struct {
-	Status    string           `json:"status"`           // Overall status (ok/degraded) / Общий статус (ok/degraded)
-	Timestamp string           `json:"timestamp"`        // Check timestamp / Время проверки
-	Checks    map[string]Check `json:"checks,omitempty"` // Individual checks / Отдельные проверки
+	Status    string           `json:"status"`           // Overall status (ok/degraded)
+	Timestamp string           `json:"timestamp"`        // Check timestamp
+	Checks    map[string]Check `json:"checks,omitempty"` // Individual checks
 }
 
 // Check represents an individual health check result.
-// Check представляет результат отдельной проверки здоровья.
 type Check struct {
-	Status  string `json:"status"`            // Check status (healthy/unhealthy) / Статус проверки
-	Message string `json:"message,omitempty"` // Error message if unhealthy / Сообщение об ошибке
+	Status  string `json:"status"`            // Check status (healthy/unhealthy)
+	Message string `json:"message,omitempty"` // Error message if unhealthy
 }
 
 // Live handles GET /health/live.
-// Live обрабатывает GET /health/live.
 //
 // Liveness probe - checks if the service is running.
-// Liveness проба - проверяет, запущен ли сервис.
 // @Summary Liveness probe
 // @Description Check if the service is alive
 // @Tags health
@@ -67,12 +59,9 @@ func (h *HealthHandler) Live(c *gin.Context) {
 }
 
 // Ready handles GET /health/ready.
-// Ready обрабатывает GET /health/ready.
 //
 // Readiness probe - checks if the service is ready to accept requests.
-// Readiness проба - проверяет, готов ли сервис принимать запросы.
 // Verifies database and Redis connections.
-// Проверяет подключения к БД и Redis.
 // @Summary Readiness probe
 // @Description Check if the service is ready to accept requests
 // @Tags health
@@ -84,7 +73,7 @@ func (h *HealthHandler) Ready(c *gin.Context) {
 	checks := make(map[string]Check)
 	allHealthy := true
 
-	// Check database with timeout / Проверяем БД с таймаутом
+	// Check database with timeout
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 
@@ -99,7 +88,7 @@ func (h *HealthHandler) Ready(c *gin.Context) {
 		checks["database"] = Check{Status: "healthy"}
 	}
 
-	// Check Redis / Проверяем Redis
+	// Check Redis
 	if h.redis != nil {
 		if err := h.redis.Ping(ctx).Err(); err != nil {
 			checks["redis"] = Check{Status: "unhealthy", Message: err.Error()}
@@ -109,7 +98,7 @@ func (h *HealthHandler) Ready(c *gin.Context) {
 		}
 	}
 
-	// Determine overall status / Определяем общий статус
+	// Determine overall status
 	status := "ok"
 	httpStatus := http.StatusOK
 	if !allHealthy {
@@ -125,7 +114,6 @@ func (h *HealthHandler) Ready(c *gin.Context) {
 }
 
 // Health handles GET /health (legacy endpoint).
-// Health обрабатывает GET /health (устаревший эндпоинт).
 // @Summary Health check
 // @Description Basic health check
 // @Tags health

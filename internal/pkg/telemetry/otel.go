@@ -1,5 +1,4 @@
 // Package telemetry provides OpenTelemetry instrumentation for distributed tracing.
-// Пакет telemetry предоставляет инструментацию OpenTelemetry для распределённой трассировки.
 package telemetry
 
 import (

@@ -1,5 +1,4 @@
 // Package service contains the business logic layer of the application.
-// Пакет service содержит слой бизнес-логики приложения.
 package service
 
 import (
@@ -18,22 +17,18 @@ import (
 )
 
 // UserService implements port.UserService interface.
-// UserService реализует интерфейс port.UserService.
 //
 // Handles user management operations including CRUD, blocking,
 // and audit logging using saga pattern for distributed transactions.
-// Обрабатывает операции управления пользователями, включая CRUD, блокировку,
-// и аудит-логирование с использованием паттерна saga для распределённых транзакций.
 type UserService struct {
-	userRepo  port.UserRepository          // User repository / Репозиторий пользователей
-	txManager *postgres.TransactionManager // Transaction manager / Менеджер транзакций
-	authz     port.AuthorizationService    // Authorization service / Сервис авторизации
-	audit     port.AuditService            // Audit service / Сервис аудита
-	logger    *logger.Logger               // Logger instance / Экземпляр логгера
+	userRepo  port.UserRepository          // User repository
+	txManager *postgres.TransactionManager // Transaction manager
+	authz     port.AuthorizationService    // Authorization service
+	audit     port.AuditService            // Audit service
+	logger    *logger.Logger               // Logger instance
 }
 
 // NewUserService creates a new UserService instance.
-// NewUserService создаёт новый экземпляр UserService.
 func NewUserService(
 	userRepo port.UserRepository,
 	txManager *postgres.TransactionManager,
@@ -51,21 +46,18 @@ func NewUserService(
 }
 
 // CreateUser creates a new user with the specified role.
-// CreateUser создаёт нового пользователя с указанной ролью.
 //
 // Uses saga pattern: creates user in transaction, then assigns role.
 // If role assignment fails, executes compensating transaction (hard delete).
-// Использует паттерн saga: создаёт пользователя в транзакции, затем назначает роль.
-// При неудачном назначении роли выполняет компенсирующую транзакцию (физическое удаление).
 func (s *UserService) CreateUser(ctx context.Context, req *domain.CreateUserRequest, createdBy int64, ipAddress, userAgent string) (*domain.User, error) {
 	log := s.logger.WithContext(ctx)
 
-	// Set default password type / Устанавливаем тип пароля по умолчанию
+	// Set default password type
 	if req.PasswordType == "" {
 		req.PasswordType = domain.PasswordTypePermanent
 	}
 
-	// Check if email already exists / Проверяем, существует ли email
+	// Check if email already exists
 	exists, err := s.userRepo.ExistsByEmail(ctx, req.Email)
 	if err != nil {
 		log.Error("failed to check email existence", "error", err)
@@ -75,14 +67,14 @@ func (s *UserService) CreateUser(ctx context.Context, req *domain.CreateUserRequ
 		return nil, apperror.Conflict("user", "email", req.Email)
 	}
 
-	// Hash password / Хэшируем пароль
+	// Hash password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		log.Error("failed to hash password", "error", err)
 		return nil, apperror.Internal("failed to hash password", err)
 	}
 
-	// Create user object / Создаём объект пользователя
+	// Create user object
 	user := &domain.User{
 		Email:        req.Email,
 		PasswordHash: string(hashedPassword),
@@ -94,10 +86,9 @@ func (s *UserService) CreateUser(ctx context.Context, req *domain.CreateUserRequ
 	}
 
 	// Create user in transaction with audit log
-	// Создаём пользователя в транзакции с аудит-логом
 	var createdUser *domain.User
 	err = s.txManager.WithTransaction(ctx, func(tx *gorm.DB) error {
-		// Create user / Создаём пользователя
+		// Create user
 		repo, ok := s.userRepo.(*postgres.UserRepository)
 		if !ok {
 			return apperror.Internal("invalid repository type", nil)
@@ -107,7 +98,7 @@ func (s *UserService) CreateUser(ctx context.Context, req *domain.CreateUserRequ
 		}
 		createdUser = user
 
-		// Audit log within transaction / Аудит-лог в рамках транзакции
+		// Audit log within transaction
 		return s.audit.LogActionWithContextTx(ctx, tx, createdBy, "user.create", "user", fmt.Sprintf("%d", user.ID), map[string]interface{}{
 			"email":         user.Email,
 			"full_name":     user.FullName,
@@ -122,12 +113,10 @@ func (s *UserService) CreateUser(ctx context.Context, req *domain.CreateUserRequ
 	}
 
 	// Assign role AFTER successful commit (saga pattern)
-	// Назначаем роль ПОСЛЕ успешного коммита (паттерн saga)
 	if err := s.authz.AddRoleToUser(ctx, createdUser.ID, req.Role); err != nil {
 		log.Error("failed to assign role, executing compensating transaction", "user_id", createdUser.ID, "error", err)
 
 		// Compensating action: hard delete user
-		// Компенсирующее действие: физическое удаление пользователя
 		if repo, ok := s.userRepo.(*postgres.UserRepository); ok {
 			if deleteErr := repo.HardDelete(ctx, createdUser.ID); deleteErr != nil {
 				log.Error("CRITICAL: failed to cleanup user after role assignment failure", "user_id", createdUser.ID, "error", deleteErr)
@@ -143,23 +132,20 @@ func (s *UserService) CreateUser(ctx context.Context, req *domain.CreateUserRequ
 }
 
 // GetUserByID retrieves a user by their unique identifier.
-// GetUserByID получает пользователя по уникальному идентификатору.
 func (s *UserService) GetUserByID(ctx context.Context, id int64) (*domain.User, error) {
 	return s.userRepo.FindByID(ctx, id)
 }
 
 // ListUsers retrieves users with filtering and pagination.
-// ListUsers получает пользователей с фильтрацией и пагинацией.
 func (s *UserService) ListUsers(ctx context.Context, filter port.UserFilter) ([]domain.User, int64, error) {
 	return s.userRepo.List(ctx, filter)
 }
 
 // BlockUser blocks a user account, preventing login.
-// BlockUser блокирует учётную запись пользователя, предотвращая вход.
 func (s *UserService) BlockUser(ctx context.Context, id, blockedBy int64, ipAddress, userAgent string) error {
 	log := s.logger.WithContext(ctx)
 
-	// Get user first / Сначала получаем пользователя
+	// Get user first
 	user, err := s.userRepo.FindByID(ctx, id)
 	if err != nil {
 		return err
@@ -170,7 +156,6 @@ func (s *UserService) BlockUser(ctx context.Context, id, blockedBy int64, ipAddr
 	}
 
 	// Block user in transaction with audit log
-	// Блокируем пользователя в транзакции с аудит-логом
 	err = s.txManager.WithTransaction(ctx, func(tx *gorm.DB) error {
 		user.IsBlocked = true
 		user.UpdatedAt = time.Now()
@@ -198,11 +183,10 @@ func (s *UserService) BlockUser(ctx context.Context, id, blockedBy int64, ipAddr
 }
 
 // UnblockUser unblocks a previously blocked user account.
-// UnblockUser разблокирует ранее заблокированную учётную запись.
 func (s *UserService) UnblockUser(ctx context.Context, id, unblockedBy int64, ipAddress, userAgent string) error {
 	log := s.logger.WithContext(ctx)
 
-	// Get user first / Сначала получаем пользователя
+	// Get user first
 	user, err := s.userRepo.FindByID(ctx, id)
 	if err != nil {
 		return err
@@ -213,7 +197,6 @@ func (s *UserService) UnblockUser(ctx context.Context, id, unblockedBy int64, ip
 	}
 
 	// Unblock user in transaction with audit log
-	// Разблокируем пользователя в транзакции с аудит-логом
 	err = s.txManager.WithTransaction(ctx, func(tx *gorm.DB) error {
 		user.IsBlocked = false
 		user.UpdatedAt = time.Now()

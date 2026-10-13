@@ -1,5 +1,4 @@
 // Package validator provides custom validation functions and utilities.
-// Пакет validator предоставляет кастомные функции валидации и утилиты.
 package validator
 
 import (
@@ -136,7 +135,6 @@ func validateNoHTML(fl validator.FieldLevel) bool {
 type ValidationErrors map[string]string
 
 // FormatValidationErrors converts validator.ValidationErrors to a user-friendly format.
-// FormatValidationErrors преобразует validator.ValidationErrors в удобный для пользователя формат.
 func FormatValidationErrors(err error) ValidationErrors {
 	result := make(ValidationErrors)
 
@@ -178,16 +176,14 @@ func formatErrorMessage(e validator.FieldError) string {
 }
 
 // PasswordStrength represents the strength of a password.
-// PasswordStrength представляет силу пароля.
 type PasswordStrength int
 
 // Password strength levels.
-// Уровни силы пароля.
 const (
-	PasswordWeak   PasswordStrength = iota // Weak password / Слабый пароль
-	PasswordFair                           // Fair password / Средний пароль
-	PasswordGood                           // Good password / Хороший пароль
-	PasswordStrong                         // Strong password / Сильный пароль
+	PasswordWeak   PasswordStrength = iota // Weak password
+	PasswordFair                           // Fair password
+	PasswordGood                           // Good password
+	PasswordStrong                         // Strong password
 )
 
 // CheckPasswordStrength evaluates the strength of a password.
@@ -264,20 +260,18 @@ func (ps PasswordStrength) String() string {
 }
 
 // PasswordRequirements defines configurable password complexity requirements.
-// PasswordRequirements определяет конфигурируемые требования к сложности пароля.
 type PasswordRequirements struct {
-	MinLength        int  // Minimum password length / Минимальная длина пароля
-	MaxLength        int  // Maximum password length / Максимальная длина пароля
-	RequireUppercase bool // Require at least one uppercase letter / Требовать хотя бы одну заглавную букву
-	RequireLowercase bool // Require at least one lowercase letter / Требовать хотя бы одну строчную букву
-	RequireDigit     bool // Require at least one digit / Требовать хотя бы одну цифру
-	RequireSpecial   bool // Require at least one special character / Требовать хотя бы один спецсимвол
-	DisallowCommon   bool // Disallow common passwords / Запретить распространённые пароли
-	DisallowSequence bool // Disallow sequential characters / Запретить последовательности символов
+	MinLength        int  // Minimum password length
+	MaxLength        int  // Maximum password length
+	RequireUppercase bool // Require at least one uppercase letter
+	RequireLowercase bool // Require at least one lowercase letter
+	RequireDigit     bool // Require at least one digit
+	RequireSpecial   bool // Require at least one special character
+	DisallowCommon   bool // Disallow common passwords
+	DisallowSequence bool // Disallow sequential characters
 }
 
 // DefaultPasswordRequirements returns the default password requirements.
-// DefaultPasswordRequirements возвращает требования к паролю по умолчанию.
 func DefaultPasswordRequirements() PasswordRequirements {
 	return PasswordRequirements{
 		MinLength:        8,
@@ -292,10 +286,9 @@ func DefaultPasswordRequirements() PasswordRequirements {
 }
 
 // PasswordValidationResult contains the result of password validation.
-// PasswordValidationResult содержит результат валидации пароля.
 type PasswordValidationResult struct {
-	Valid    bool     // Whether the password is valid / Валиден ли пароль
-	Errors   []string // List of validation errors / Список ошибок валидации
+	Valid    bool     // Whether the password is valid
+	Errors   []string // List of validation errors
 	Strength PasswordStrength
 }
 
@@ -371,7 +364,6 @@ func validatePatterns(password string, req PasswordRequirements) []string {
 }
 
 // ValidatePassword validates a password against the given requirements.
-// ValidatePassword проверяет пароль на соответствие заданным требованиям.
 func ValidatePassword(password string, req PasswordRequirements) PasswordValidationResult {
 	result := PasswordValidationResult{
 		Valid:    true,
@@ -396,13 +388,11 @@ func ValidatePassword(password string, req PasswordRequirements) PasswordValidat
 }
 
 // ValidatePasswordDefault validates password with default requirements.
-// ValidatePasswordDefault проверяет пароль с требованиями по умолчанию.
 func ValidatePasswordDefault(password string) PasswordValidationResult {
 	return ValidatePassword(password, DefaultPasswordRequirements())
 }
 
 // isCommonPassword checks if password is in the list of common passwords.
-// isCommonPassword проверяет, является ли пароль распространённым.
 func isCommonPassword(password string) bool {
 	commonPasswords := map[string]bool{
 		"password":    true,
@@ -454,7 +444,6 @@ func isCommonPassword(password string) bool {
 }
 
 // hasSequentialChars checks if password contains sequential characters.
-// hasSequentialChars проверяет, содержит ли пароль последовательности символов.
 func hasSequentialChars(password string, minSeqLength int) bool {
 	if len(password) < minSeqLength {
 		return false
@@ -462,7 +451,7 @@ func hasSequentialChars(password string, minSeqLength int) bool {
 
 	runes := []rune(strings.ToLower(password))
 
-	// Check for ascending sequences / Проверка восходящих последовательностей
+	// Check for ascending sequences
 	ascCount := 1
 	for i := 1; i < len(runes); i++ {
 		if runes[i] == runes[i-1]+1 {
@@ -475,7 +464,7 @@ func hasSequentialChars(password string, minSeqLength int) bool {
 		}
 	}
 
-	// Check for descending sequences / Проверка нисходящих последовательностей
+	// Check for descending sequences
 	descCount := 1
 	for i := 1; i < len(runes); i++ {
 		if runes[i] == runes[i-1]-1 {
@@ -488,7 +477,7 @@ func hasSequentialChars(password string, minSeqLength int) bool {
 		}
 	}
 
-	// Check for keyboard sequences / Проверка клавиатурных последовательностей
+	// Check for keyboard sequences
 	keyboardSequences := []string{
 		"qwerty", "asdfgh", "zxcvbn", "qazwsx", "!@#$%^",
 		"йцукен", "фывапр", "ячсмит",
@@ -505,7 +494,6 @@ func hasSequentialChars(password string, minSeqLength int) bool {
 }
 
 // hasRepeatedChars checks if password contains too many repeated characters.
-// hasRepeatedChars проверяет, содержит ли пароль слишком много повторяющихся символов.
 func hasRepeatedChars(password string, maxRepeats int) bool {
 	if len(password) < maxRepeats {
 		return false
