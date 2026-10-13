@@ -20,12 +20,10 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// newLogger returns a debug-level JSON logger writing into buf.
 func newLogger(buf *bytes.Buffer) *logger.Logger {
 	return logger.New(logger.Config{Level: "debug", Format: "json", Output: buf})
 }
 
-// logRecords parses every JSON line written to buf, in order.
 func logRecords(t *testing.T, buf *bytes.Buffer) []map[string]any {
 	t.Helper()
 	lines := bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte("\n"))
@@ -41,14 +39,12 @@ func logRecords(t *testing.T, buf *bytes.Buffer) []map[string]any {
 	return records
 }
 
-// serve runs req through h and returns the recorded response.
 func serve(h http.Handler, req *http.Request) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
 }
 
-// decodeEnvelope parses the JSON response envelope from rec.
 func decodeEnvelope(t *testing.T, rec *httptest.ResponseRecorder) response.APIResponse {
 	t.Helper()
 	var env response.APIResponse
@@ -56,7 +52,6 @@ func decodeEnvelope(t *testing.T, rec *httptest.ResponseRecorder) response.APIRe
 	return env
 }
 
-// okHandler answers 200 with a plain "ok" body.
 func okHandler(c *gin.Context) {
 	c.String(http.StatusOK, "ok")
 }

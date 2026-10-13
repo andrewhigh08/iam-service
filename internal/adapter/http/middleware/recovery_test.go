@@ -16,7 +16,6 @@ import (
 	"github.com/andrewhigh08/iam-service/internal/pkg/apperror"
 )
 
-// recoveryRouter serves GET /panic behind RequestID and Recovery with the given handler.
 func recoveryRouter(buf *bytes.Buffer, h gin.HandlerFunc) *gin.Engine {
 	r := gin.New()
 	r.Use(RequestID(), Recovery(newLogger(buf)))

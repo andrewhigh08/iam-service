@@ -30,7 +30,6 @@ func AccessLog(log *logger.Logger) gin.HandlerFunc {
 	}
 }
 
-// logRequest writes the access log line for a completed request.
 func logRequest(log *logger.Logger, c *gin.Context, status int, elapsed time.Duration, panicked bool) {
 	route := c.FullPath()
 	if route == "" {

@@ -91,7 +91,6 @@ func validateOrigin(origin string) error {
 	return nil
 }
 
-// hasPathPrefix reports whether path is prefix itself or lies under it.
 func hasPathPrefix(path, prefix string) bool {
 	return path == prefix || strings.HasPrefix(path, prefix+"/")
 }

@@ -15,7 +15,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// logRecord decodes the single JSON record written to buf.
 func logRecord(t *testing.T, buf *bytes.Buffer) map[string]any {
 	t.Helper()
 	var rec map[string]any

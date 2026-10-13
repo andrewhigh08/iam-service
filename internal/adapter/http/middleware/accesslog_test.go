@@ -14,7 +14,6 @@ import (
 	"github.com/andrewhigh08/iam-service/internal/pkg/logger"
 )
 
-// accessLogRouter serves GET /users/:id behind RequestID and AccessLog with the given handler.
 func accessLogRouter(buf *bytes.Buffer, h gin.HandlerFunc) *gin.Engine {
 	r := gin.New()
 	r.Use(RequestID(), AccessLog(newLogger(buf)))
@@ -22,7 +21,6 @@ func accessLogRouter(buf *bytes.Buffer, h gin.HandlerFunc) *gin.Engine {
 	return r
 }
 
-// singleRecord asserts that exactly one log line was written and returns it.
 func singleRecord(t *testing.T, buf *bytes.Buffer) map[string]any {
 	t.Helper()
 	records := logRecords(t, buf)

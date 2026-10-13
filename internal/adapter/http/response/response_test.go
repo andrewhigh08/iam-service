@@ -20,7 +20,6 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// run serves one GET /test request through h and returns the recorded response.
 func run(t *testing.T, h gin.HandlerFunc) *httptest.ResponseRecorder {
 	t.Helper()
 	r := gin.New()
@@ -30,7 +29,6 @@ func run(t *testing.T, h gin.HandlerFunc) *httptest.ResponseRecorder {
 	return rec
 }
 
-// decode parses the envelope in rec.
 func decode(t *testing.T, rec *httptest.ResponseRecorder) APIResponse {
 	t.Helper()
 	var resp APIResponse
@@ -38,7 +36,6 @@ func decode(t *testing.T, rec *httptest.ResponseRecorder) APIResponse {
 	return resp
 }
 
-// assertErrorEnvelope checks the status and the error section of rec and returns the error body.
 func assertErrorEnvelope(t *testing.T, rec *httptest.ResponseRecorder, status int, code, message string) *ErrorBody {
 	t.Helper()
 	require.Equal(t, status, rec.Code, "body: %s", rec.Body.String())

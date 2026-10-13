@@ -11,7 +11,6 @@ import (
 	"github.com/andrewhigh08/iam-service/internal/pkg/apperror"
 )
 
-// violations extracts Details["errors"] from a validation error after checking its shape.
 func violations(t *testing.T, err error) []string {
 	t.Helper()
 	var appErr *apperror.AppError

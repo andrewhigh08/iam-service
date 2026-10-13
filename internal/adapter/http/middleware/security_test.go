@@ -115,7 +115,6 @@ func TestNewCORS_RejectsInvalidOrigins(t *testing.T) {
 	}
 }
 
-// corsRouter serves GET and POST /data behind the CORS middleware for origins.
 func corsRouter(t *testing.T, origins []string) *gin.Engine {
 	t.Helper()
 	mw, err := NewCORS(origins)

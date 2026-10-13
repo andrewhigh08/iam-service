@@ -233,7 +233,6 @@ func (c *Config) validateAdmin() []error {
 	return nil
 }
 
-// policyViolations renders the rules a password violated, as listed by validator.ValidatePassword.
 func policyViolations(err error) string {
 	if appErr, ok := apperror.AsAppError(err); ok {
 		if violations, ok := appErr.Details["errors"].([]string); ok {
@@ -304,7 +303,6 @@ func (c *Config) DSN() string {
 // dsnEscaper escapes the two characters that are special inside a quoted libpq value.
 var dsnEscaper = strings.NewReplacer(`\`, `\\`, `'`, `\'`)
 
-// dsnValue quotes v as a libpq keyword/value string.
 func dsnValue(v string) string {
 	return "'" + dsnEscaper.Replace(v) + "'"
 }
@@ -314,7 +312,6 @@ func (c *Config) RedisAddr() string {
 	return net.JoinHostPort(c.Redis.Host, c.Redis.Port)
 }
 
-// normalize trims list entries and applies the DEV_MODE admin password fallback.
 func (c *Config) normalize() {
 	c.Server.TrustedProxies = cleanList(c.Server.TrustedProxies)
 	c.CORS.AllowedOrigins = cleanList(c.CORS.AllowedOrigins)
@@ -324,7 +321,6 @@ func (c *Config) normalize() {
 	}
 }
 
-// cleanList trims every entry and drops the empty ones.
 func cleanList(in []string) []string {
 	out := make([]string, 0, len(in))
 	for _, v := range in {

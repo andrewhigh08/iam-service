@@ -16,7 +16,6 @@ const (
 	RequestIDKey = "request_id"
 )
 
-// requestIDPattern is what a client-supplied request id must match to be accepted.
 var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 
 // RequestID assigns every request an id: the client's X-Request-ID when it is 1 to 128

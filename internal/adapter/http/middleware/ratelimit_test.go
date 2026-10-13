@@ -19,7 +19,6 @@ import (
 	"github.com/andrewhigh08/iam-service/internal/pkg/apperror"
 )
 
-// entryKeys returns the keys currently tracked by the limiter.
 func (l *IPRateLimiter) entryKeys() []string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -30,7 +29,6 @@ func (l *IPRateLimiter) entryKeys() []string {
 	return keys
 }
 
-// countingRouter serves GET /ping behind mw and counts how often the handler ran.
 func countingRouter(mw gin.HandlerFunc) (*gin.Engine, *atomic.Int64) {
 	var hits atomic.Int64
 	r := gin.New()
@@ -41,7 +39,6 @@ func countingRouter(mw gin.HandlerFunc) (*gin.Engine, *atomic.Int64) {
 	return r, &hits
 }
 
-// getFrom sends GET /ping to r from the given client IP.
 func getFrom(t *testing.T, r http.Handler, ip string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/ping", http.NoBody)

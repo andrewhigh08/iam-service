@@ -17,8 +17,7 @@ const (
 	janitorInterval = time.Minute
 	idleTTL         = 3 * time.Minute
 	loginKeyPrefix  = "login:"
-	// maxEntries bounds the number of client buckets kept in memory.
-	maxEntries = 100_000
+	maxEntries      = 100_000
 	// ipv6ClientBits is the prefix length that identifies one IPv6 client: a subscriber
 	// typically controls at least a /64, so single addresses would be free to rotate.
 	ipv6ClientBits = 64
@@ -87,7 +86,6 @@ func (l *IPRateLimiter) LoginMiddleware() gin.HandlerFunc {
 	}
 }
 
-// limitRequest lets the request through or aborts it with 429 and message.
 func (l *IPRateLimiter) limitRequest(c *gin.Context, key string, limit rate.Limit, burst int, message string) {
 	now := time.Now()
 	ok, wait := reserve(l.limiter(key, limit, burst, now), now)
@@ -99,7 +97,6 @@ func (l *IPRateLimiter) limitRequest(c *gin.Context, key string, limit rate.Limi
 	c.Next()
 }
 
-// limiter returns the limiter stored under key, creating it when absent, and marks it as used at now.
 func (l *IPRateLimiter) limiter(key string, limit rate.Limit, burst int, now time.Time) *rate.Limiter {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -125,7 +122,6 @@ func (l *IPRateLimiter) evictOne() {
 	}
 }
 
-// janitor evicts idle entries every janitorInterval until ctx is done.
 func (l *IPRateLimiter) janitor(ctx context.Context) {
 	ticker := time.NewTicker(l.janitorInterval)
 	defer ticker.Stop()
@@ -139,7 +135,6 @@ func (l *IPRateLimiter) janitor(ctx context.Context) {
 	}
 }
 
-// evictIdle removes entries unused for longer than idleTTL as of now and returns how many were removed.
 func (l *IPRateLimiter) evictIdle(now time.Time) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -187,7 +182,6 @@ func reserve(lim *rate.Limiter, now time.Time) (bool, time.Duration) {
 	return false, delay
 }
 
-// retryAfterSeconds rounds wait up to whole seconds, never below one and never above an hour.
 func retryAfterSeconds(wait time.Duration) int {
 	seconds := math.Ceil(wait.Seconds())
 	if seconds > maxRetryAfterSeconds {

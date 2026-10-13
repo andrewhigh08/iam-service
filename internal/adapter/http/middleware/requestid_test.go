@@ -14,7 +14,6 @@ import (
 	"github.com/andrewhigh08/iam-service/internal/pkg/logger"
 )
 
-// requestIDRouter serves GET /ping behind RequestID and reports the ids the handler observed.
 func requestIDRouter(ginID, ctxID *string) *gin.Engine {
 	r := gin.New()
 	r.Use(RequestID())

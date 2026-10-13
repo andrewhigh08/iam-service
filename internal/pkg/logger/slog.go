@@ -11,7 +11,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// contextKey is the private type of the keys stored in a context by this package.
 type contextKey string
 
 const (
@@ -73,7 +72,6 @@ func New(cfg Config) *Logger {
 	return &Logger{Logger: slog.New(handler)}
 }
 
-// parseLevel maps a level name to a slog.Level, defaulting to info.
 func parseLevel(level string) slog.Level {
 	switch level {
 	case "debug":

@@ -52,7 +52,6 @@ func ValidatePassword(pw string, p Policy) error {
 	return apperror.ValidationError("password does not meet the policy", map[string]any{"errors": violations})
 }
 
-// lengthViolations checks the character limits of p and the bcrypt byte limit.
 func lengthViolations(pw string, p Policy) []string {
 	var out []string
 	runes := utf8.RuneCountInString(pw)
@@ -68,7 +67,6 @@ func lengthViolations(pw string, p Policy) []string {
 	return out
 }
 
-// classViolations checks the character classes required by p.
 func classViolations(pw string, p Policy) []string {
 	var upper, lower, digit, special bool
 	for _, r := range pw {
@@ -100,7 +98,6 @@ func classViolations(pw string, p Policy) []string {
 	return out
 }
 
-// isCommon reports whether pw, compared case-insensitively, is a well-known password.
 func isCommon(pw string) bool {
 	_, ok := commonPasswords[strings.ToLower(pw)]
 	return ok

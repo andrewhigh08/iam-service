@@ -17,7 +17,6 @@ import (
 // strongPassword satisfies the password policy the administrator password is held to.
 const strongPassword = "Str0ng-Secret!"
 
-// envNames returns every environment variable read into typ, following nested structs.
 func envNames(typ reflect.Type) []string {
 	var names []string
 	for i := range typ.NumField() {
@@ -53,7 +52,6 @@ func isolate(t *testing.T) string {
 	return dir
 }
 
-// setenv sets every variable in vars for the duration of the test.
 func setenv(t *testing.T, vars map[string]string) {
 	t.Helper()
 	for key, value := range vars {
@@ -61,13 +59,11 @@ func setenv(t *testing.T, vars map[string]string) {
 	}
 }
 
-// writeDotEnv writes content as the .env file in dir.
 func writeDotEnv(t *testing.T, dir, content string) {
 	t.Helper()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".env"), []byte(content), 0o600))
 }
 
-// defaultConfig returns the values Load produces from an empty environment.
 func defaultConfig() Config {
 	return Config{
 		Server: ServerConfig{Port: "8080", ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, ShutdownTimeout: 10 * time.Second},
