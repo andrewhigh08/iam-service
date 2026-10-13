@@ -3,11 +3,16 @@ package pgrepo
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+
+	"github.com/andrewhigh08/iam-service/internal/pkg/apperror"
+	"github.com/andrewhigh08/iam-service/internal/port"
 )
 
 func TestLikeEscaper(t *testing.T) {
@@ -30,28 +35,29 @@ func TestLikeEscaper(t *testing.T) {
 	}
 }
 
-func TestNormalizePage(t *testing.T) {
+func TestList_RejectsANonPositivePage(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		page     int
-		size     int
-		wantPage int
-		wantSize int
+		name   string
+		filter port.UserFilter
 	}{
-		{"valid values pass through", 3, 25, 3, 25},
-		{"zero page becomes the first", 0, 25, 1, 25},
-		{"negative page becomes the first", -2, 25, 1, 25},
-		{"zero size gets the default", 1, 0, 1, defaultPageSize},
-		{"negative size gets the default", 1, -5, 1, defaultPageSize},
+		{"zero page", port.UserFilter{Page: 0, PageSize: 10}},
+		{"negative page", port.UserFilter{Page: -2, PageSize: 10}},
+		{"zero page size", port.UserFilter{Page: 1, PageSize: 0}},
+		{"negative page size", port.UserFilter{Page: 1, PageSize: -5}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			page, size := normalizePage(tt.page, tt.size)
+			// No database is needed: the filter is rejected before any query runs.
+			users, total, err := NewUserRepository(nil).List(t.Context(), tt.filter)
 
-			assert.Equal(t, tt.wantPage, page)
-			assert.Equal(t, tt.wantSize, size)
+			var appErr *apperror.AppError
+			require.ErrorAs(t, err, &appErr)
+			assert.Equal(t, apperror.CodeInternal, appErr.Code)
+			assert.Equal(t, http.StatusInternalServerError, appErr.HTTPStatus)
+			assert.Nil(t, users)
+			assert.Zero(t, total)
 		})
 	}
 }

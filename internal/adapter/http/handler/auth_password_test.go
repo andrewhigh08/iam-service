@@ -17,7 +17,6 @@ const (
 	newPassword = "New-Secret-2"
 )
 
-// passwordRouter mounts the authenticated and the forced password change endpoints of f.
 func passwordRouter(f *authFixture) *gin.Engine {
 	r := gin.New()
 	r.POST("/api/v1/change-password", authenticated, f.h.ChangePassword)
@@ -25,10 +24,8 @@ func passwordRouter(f *authFixture) *gin.Engine {
 	return r
 }
 
-// freshPair is the pair the services hand out after a password change.
 var freshPair = &port.TokenPair{AccessToken: "fresh-access", RefreshToken: "fresh-refresh", ExpiresIn: 900}
 
-// wantFreshPair is freshPair as the handlers render it.
 var wantFreshPair = TokenPairResponse{AccessToken: "fresh-access", RefreshToken: "fresh-refresh", TokenType: "Bearer", ExpiresIn: 900}
 
 func TestChangePassword_ReturnsAFreshPair(t *testing.T) {
@@ -125,6 +122,7 @@ func TestChangeRequiredPassword_RejectsInvalidBodies(t *testing.T) {
 	}{
 		{"missing email", ChangeRequiredPasswordRequest{OldPassword: oldPassword, NewPassword: newPassword}, map[string]any{"email": "required"}},
 		{"malformed email", ChangeRequiredPasswordRequest{Email: "nope", OldPassword: oldPassword, NewPassword: newPassword}, map[string]any{"email": "email"}},
+		{"overlong email", ChangeRequiredPasswordRequest{Email: overlongEmail, OldPassword: oldPassword, NewPassword: newPassword}, map[string]any{"email": "max=254"}},
 		{"missing passwords", ChangeRequiredPasswordRequest{Email: testEmail}, map[string]any{"old_password": "required", "new_password": "required"}},
 	}
 	for _, tt := range tests {

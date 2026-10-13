@@ -17,7 +17,6 @@ import (
 	"github.com/andrewhigh08/iam-service/test/mocks"
 )
 
-// auditRouter mounts the audit endpoint on a mock audit service behind the test authentication.
 func auditRouter(t *testing.T) (*gin.Engine, *mocks.MockAuditService) {
 	t.Helper()
 	audit := mocks.NewMockAuditService(gomock.NewController(t))

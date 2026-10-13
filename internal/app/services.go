@@ -29,7 +29,6 @@ type services struct {
 	seeder   *service.Seeder
 }
 
-// newServices loads the signing keys and assembles the repositories, stores and services.
 func (a *App) newServices(enforcer casbin.IEnforcer) (*services, error) {
 	privateKey, publicKey, err := a.loadKeys()
 	if err != nil {
@@ -86,6 +85,10 @@ func (a *App) newServices(enforcer casbin.IEnforcer) (*services, error) {
 	if err != nil {
 		return nil, err
 	}
+	seeder, err := service.NewSeeder(userRepo, authz, a.base)
+	if err != nil {
+		return nil, err
+	}
 
 	return &services{
 		auth:     auth,
@@ -94,7 +97,7 @@ func (a *App) newServices(enforcer casbin.IEnforcer) (*services, error) {
 		audit:    audit,
 		tx:       txManager,
 		enforcer: enforcer,
-		seeder:   &service.Seeder{Users: userRepo, Authz: authz, Logger: a.base},
+		seeder:   seeder,
 	}, nil
 }
 

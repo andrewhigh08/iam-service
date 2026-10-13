@@ -6,15 +6,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 
-	// Registers the generated OpenAPI document that the Swagger UI serves.
-	_ "github.com/andrewhigh08/iam-service/docs"
+	"github.com/andrewhigh08/iam-service/docs"
 	"github.com/andrewhigh08/iam-service/internal/adapter/http/handler"
 	"github.com/andrewhigh08/iam-service/internal/adapter/http/middleware"
 	"github.com/andrewhigh08/iam-service/internal/domain"
 )
 
-// newRouter builds the gin engine in release mode with the global middleware chain and every
-// route of the service.
 func (a *App) newRouter(svcs *services) (*gin.Engine, error) {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -28,8 +25,6 @@ func (a *App) newRouter(svcs *services) (*gin.Engine, error) {
 	return r, nil
 }
 
-// useMiddleware installs the global chain: request id, recovery, tracing, metrics, access
-// log, security headers, CORS, body limit and the global rate limit, in that order.
 func (a *App) useMiddleware(r *gin.Engine) error {
 	r.Use(middleware.RequestID(), middleware.Recovery(a.base))
 	if a.cfg.Telemetry.Enabled {
@@ -53,13 +48,14 @@ func (a *App) registerRoutes(r *gin.Engine, svcs *services) {
 	authH := handler.NewAuthHandler(svcs.auth, svcs.authz, a.base)
 	userH := handler.NewUserHandler(svcs.users, a.base)
 	auditH := handler.NewAuditHandler(svcs.audit)
-	healthH := handler.NewHealthHandler(a.db, a.rdb, a.version)
+	healthH := handler.NewHealthHandler(a.healthChecks(), a.version)
 	jwksH := handler.NewJWKSHandler(svcs.auth)
 
 	r.GET("/health/live", healthH.Live)
 	r.GET("/health/ready", healthH.Ready)
 	r.GET("/.well-known/jwks.json", jwksH.JWKS)
 	handler.RegisterMetrics(r)
+	configureSwagger()
 	handler.RegisterSwagger(r)
 
 	auth := r.Group("/auth")
@@ -84,4 +80,12 @@ func (a *App) registerRoutes(r *gin.Engine, svcs *services) {
 	users.POST("", write, userH.CreateUser)
 	users.POST("/:id/block", write, userH.BlockUser)
 	users.POST("/:id/unblock", write, userH.UnblockUser)
+}
+
+// configureSwagger clears the host and schemes of the served OpenAPI document, so the Swagger
+// UI calls the API through the origin of its own page: a local run, a mapped container port
+// and a TLS-terminating proxy all work without a baked-in address.
+func configureSwagger() {
+	docs.SwaggerInfo.Host = ""
+	docs.SwaggerInfo.Schemes = []string{}
 }

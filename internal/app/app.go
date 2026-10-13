@@ -70,7 +70,6 @@ func New(ctx context.Context, cfg *config.Config, log *logger.Logger, version st
 	return a, nil
 }
 
-// init runs the wiring steps of New in dependency order.
 func (a *App) init(ctx context.Context) error {
 	if err := a.initTelemetry(ctx); err != nil {
 		return err
@@ -103,7 +102,6 @@ func (a *App) init(ctx context.Context) error {
 	return nil
 }
 
-// initTelemetry installs the global tracer provider when OTEL_ENABLED is set.
 func (a *App) initTelemetry(ctx context.Context) error {
 	tracer, err := telemetry.Init(ctx, telemetry.Config{
 		Enabled:        a.cfg.Telemetry.Enabled,
@@ -119,8 +117,6 @@ func (a *App) initTelemetry(ctx context.Context) error {
 	return nil
 }
 
-// buildServices creates the enforcer and the services on top of the open connections and
-// seeds the default data.
 func (a *App) buildServices(ctx context.Context) (*services, error) {
 	enforcer, err := a.newEnforcer()
 	if err != nil {
@@ -149,7 +145,6 @@ func (a *App) Close() error {
 	return a.closeErr
 }
 
-// release closes the resources in reverse order of creation and joins their errors.
 func (a *App) release() error {
 	ctx, cancel := context.WithTimeout(context.Background(), a.closeTimeout())
 	defer cancel()
@@ -174,7 +169,6 @@ func (a *App) release() error {
 	return errors.Join(errs...)
 }
 
-// closeTimeout is the time allowed for shutting down the server and flushing traces.
 func (a *App) closeTimeout() time.Duration {
 	if a.cfg.Server.ShutdownTimeout > 0 {
 		return a.cfg.Server.ShutdownTimeout

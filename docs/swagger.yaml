@@ -44,6 +44,7 @@ definitions:
   handler.ChangeRequiredPasswordRequest:
     properties:
       email:
+        maxLength: 254
         type: string
       new_password:
         type: string
@@ -64,6 +65,7 @@ definitions:
   handler.CreateUserRequest:
     properties:
       email:
+        maxLength: 254
         type: string
       full_name:
         type: string
@@ -111,6 +113,7 @@ definitions:
   handler.LoginRequest:
     properties:
       email:
+        maxLength: 254
         type: string
       password:
         type: string
@@ -255,7 +258,6 @@ definitions:
       total_pages:
         type: integer
     type: object
-host: localhost:8080
 info:
   contact:
     name: API Support
@@ -293,8 +295,9 @@ paths:
     post:
       consumes:
       - application/json
-      description: Replaces the caller's password, ends every other session and returns
-        a fresh token pair. The new password must satisfy the password policy.
+      description: Replaces the caller's password, ends every session including the
+        caller's and returns a fresh token pair. The new password must satisfy the
+        password policy.
       parameters:
       - description: Current and new password
         in: body

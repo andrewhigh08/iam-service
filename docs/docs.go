@@ -56,7 +56,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Replaces the caller's password, ends every other session and returns a fresh token pair. The new password must satisfy the password policy.",
+                "description": "Replaces the caller's password, ends every session including the caller's and returns a fresh token pair. The new password must satisfy the password policy.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1052,7 +1052,8 @@ const docTemplate = `{
             ],
             "properties": {
                 "email": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 254
                 },
                 "new_password": {
                     "type": "string"
@@ -1083,7 +1084,8 @@ const docTemplate = `{
             ],
             "properties": {
                 "email": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 254
                 },
                 "full_name": {
                     "type": "string"
@@ -1151,7 +1153,8 @@ const docTemplate = `{
             ],
             "properties": {
                 "email": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 254
                 },
                 "password": {
                     "type": "string"
@@ -1383,7 +1386,7 @@ const docTemplate = `{
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0",
-	Host:             "localhost:8080",
+	Host:             "",
 	BasePath:         "/",
 	Schemes:          []string{"http", "https"},
 	Title:            "IAM Service API",

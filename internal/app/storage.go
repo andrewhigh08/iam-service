@@ -13,6 +13,7 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 	"gorm.io/plugin/opentelemetry/tracing"
 
+	"github.com/andrewhigh08/iam-service/internal/adapter/http/handler"
 	"github.com/andrewhigh08/iam-service/internal/adapter/pgrepo"
 	"github.com/andrewhigh08/iam-service/migrations"
 )
@@ -84,8 +85,6 @@ func closePool(db *gorm.DB) {
 	}
 }
 
-// openRedis connects to Redis, installs tracing when enabled, verifies the connection and
-// checks that the server does not evict keys.
 func (a *App) openRedis(ctx context.Context) error {
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     a.cfg.RedisAddr(),
@@ -121,5 +120,12 @@ func (a *App) warnOnEviction(ctx context.Context) {
 	if strings.HasPrefix(policy, "allkeys-") || strings.HasPrefix(policy, "volatile-") {
 		a.log.Error("redis evicts keys under memory pressure, revocations and lockouts can be lost",
 			"maxmemory_policy", policy, "required", "noeviction")
+	}
+}
+
+func (a *App) healthChecks() map[string]handler.Pinger {
+	return map[string]handler.Pinger{
+		"database": handler.PingerFunc(a.sqlDB.PingContext),
+		"redis":    handler.PingerFunc(func(ctx context.Context) error { return a.rdb.Ping(ctx).Err() }),
 	}
 }

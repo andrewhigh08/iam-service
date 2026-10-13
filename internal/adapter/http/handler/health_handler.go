@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
-	"gorm.io/gorm"
 )
 
 const (
@@ -20,19 +18,31 @@ const (
 	readyTimeout   = 5 * time.Second
 )
 
-// errNotConfigured marks a dependency the handler was wired without.
 var errNotConfigured = errors.New("not configured")
+
+// Pinger verifies that a dependency can be reached.
+type Pinger interface {
+	Ping(ctx context.Context) error
+}
+
+// PingerFunc adapts a function to the Pinger interface.
+type PingerFunc func(ctx context.Context) error
+
+// Ping calls f.
+func (f PingerFunc) Ping(ctx context.Context) error {
+	return f(ctx)
+}
 
 // HealthHandler serves the liveness and readiness probes.
 type HealthHandler struct {
-	db      *gorm.DB
-	rdb     *redis.Client
+	checks  map[string]Pinger
 	version string
 }
 
-// NewHealthHandler creates a HealthHandler; version is reported by the liveness probe.
-func NewHealthHandler(db *gorm.DB, rdb *redis.Client, version string) *HealthHandler {
-	return &HealthHandler{db: db, rdb: rdb, version: version}
+// NewHealthHandler creates a HealthHandler. The readiness probe reports every entry of checks
+// under its key, counting a nil Pinger as unreachable; version is reported by the liveness probe.
+func NewHealthHandler(checks map[string]Pinger, version string) *HealthHandler {
+	return &HealthHandler{checks: checks, version: version}
 }
 
 // LiveResponse is the body of GET /health/live.
@@ -76,46 +86,32 @@ func (h *HealthHandler) Ready(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), readyTimeout)
 	defer cancel()
 
-	checks := map[string]Check{
-		"database": h.check(c, "database", h.pingDB(ctx)),
-		"redis":    h.check(c, "redis", h.pingRedis(ctx)),
-	}
 	status, code := healthOK, http.StatusOK
-	for _, chk := range checks {
+	checks := make(map[string]Check, len(h.checks))
+	for name, pinger := range h.checks {
+		chk := check(c, name, ping(ctx, pinger))
 		if chk.Status != checkHealthy {
 			status, code = healthDegraded, http.StatusServiceUnavailable
-			break
 		}
+		checks[name] = chk
 	}
 	c.JSON(code, ReadyResponse{Status: status, Checks: checks})
 }
 
+// ping runs p within ctx; a nil p counts as unreachable.
+func ping(ctx context.Context, p Pinger) error {
+	if p == nil {
+		return errNotConfigured
+	}
+	return p.Ping(ctx)
+}
+
 // check renders the outcome of pinging name. The cause is attached to the gin context for the
 // access log and replaced by a generic message in the response.
-func (h *HealthHandler) check(c *gin.Context, name string, err error) Check {
+func check(c *gin.Context, name string, err error) Check {
 	if err == nil {
 		return Check{Status: checkHealthy}
 	}
 	_ = c.Error(fmt.Errorf("%s check: %w", name, err))
 	return Check{Status: checkUnhealthy, Message: name + " is unavailable"}
-}
-
-// pingDB verifies the database connection.
-func (h *HealthHandler) pingDB(ctx context.Context) error {
-	if h.db == nil {
-		return errNotConfigured
-	}
-	sqlDB, err := h.db.DB()
-	if err != nil {
-		return err
-	}
-	return sqlDB.PingContext(ctx)
-}
-
-// pingRedis verifies the Redis connection.
-func (h *HealthHandler) pingRedis(ctx context.Context) error {
-	if h.rdb == nil {
-		return errNotConfigured
-	}
-	return h.rdb.Ping(ctx).Err()
 }

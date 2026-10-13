@@ -13,7 +13,6 @@ import (
 	"github.com/andrewhigh08/iam-service/test/mocks"
 )
 
-// jwksRouter mounts the JWKS endpoint over the mocked auth service.
 func jwksRouter(t *testing.T) (*gin.Engine, *mocks.MockAuthService) {
 	t.Helper()
 	auth := mocks.NewMockAuthService(gomock.NewController(t))

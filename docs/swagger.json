@@ -17,7 +17,6 @@
         },
         "version": "1.0"
     },
-    "host": "localhost:8080",
     "basePath": "/",
     "paths": {
         "/.well-known/jwks.json": {
@@ -54,7 +53,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Replaces the caller's password, ends every other session and returns a fresh token pair. The new password must satisfy the password policy.",
+                "description": "Replaces the caller's password, ends every session including the caller's and returns a fresh token pair. The new password must satisfy the password policy.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1050,7 +1049,8 @@
             ],
             "properties": {
                 "email": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 254
                 },
                 "new_password": {
                     "type": "string"
@@ -1081,7 +1081,8 @@
             ],
             "properties": {
                 "email": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 254
                 },
                 "full_name": {
                     "type": "string"
@@ -1149,7 +1150,8 @@
             ],
             "properties": {
                 "email": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 254
                 },
                 "password": {
                     "type": "string"

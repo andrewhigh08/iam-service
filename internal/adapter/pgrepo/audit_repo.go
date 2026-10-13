@@ -2,15 +2,13 @@ package pgrepo
 
 import (
 	"context"
+	"fmt"
 
 	"gorm.io/gorm"
 
 	"github.com/andrewhigh08/iam-service/internal/domain"
 	"github.com/andrewhigh08/iam-service/internal/pkg/apperror"
 )
-
-// defaultAuditLimit bounds ListByUser when the caller passes a non-positive limit.
-const defaultAuditLimit = 50
 
 // AuditLogRepository implements port.AuditLogRepository on PostgreSQL.
 type AuditLogRepository struct {
@@ -37,10 +35,12 @@ func (r *AuditLogRepository) Create(ctx context.Context, entry *domain.AuditLog)
 	return nil
 }
 
-// ListByUser returns up to limit entries whose actor is userID, newest first.
+// ListByUser returns up to limit entries whose actor is userID, newest first. limit must be
+// positive: the handler clamps it, so any other value is a programming error and yields
+// apperror.Internal rather than a substituted default.
 func (r *AuditLogRepository) ListByUser(ctx context.Context, userID int64, limit int) ([]domain.AuditLog, error) {
 	if limit < 1 {
-		limit = defaultAuditLimit
+		return nil, apperror.Internal("failed to list audit logs", fmt.Errorf("invalid limit %d: must be positive", limit))
 	}
 	entries := []domain.AuditLog{}
 	err := r.conn(ctx).

@@ -8,7 +8,6 @@ import (
 	"github.com/andrewhigh08/iam-service/internal/pkg/apperror"
 )
 
-// txKey is the context key under which an open transaction travels.
 type txKey struct{}
 
 // TxManager implements port.TxManager with GORM transactions carried in the context.
@@ -55,13 +54,11 @@ func (m *TxManager) WithinLockedTx(ctx context.Context, key int64, fn func(ctx c
 	})
 }
 
-// txFromCtx returns the transaction carried in ctx, if any.
 func txFromCtx(ctx context.Context) (*gorm.DB, bool) {
 	tx, ok := ctx.Value(txKey{}).(*gorm.DB)
 	return tx, ok && tx != nil
 }
 
-// dbFromCtx returns the transaction carried in ctx, or fallback when there is none.
 func dbFromCtx(ctx context.Context, fallback *gorm.DB) *gorm.DB {
 	if tx, ok := txFromCtx(ctx); ok {
 		return tx
@@ -74,7 +71,6 @@ type repo struct {
 	db *gorm.DB
 }
 
-// conn returns the handle to run queries for ctx on: its transaction, or the connection pool.
 func (r repo) conn(ctx context.Context) *gorm.DB {
 	return dbFromCtx(ctx, r.db).WithContext(ctx)
 }

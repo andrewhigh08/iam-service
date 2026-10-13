@@ -3,6 +3,7 @@ package pgrepo
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -23,9 +24,6 @@ const (
 
 	// uniqueViolation is the PostgreSQL SQLSTATE of a unique constraint violation.
 	uniqueViolation = "23505"
-
-	// defaultPageSize applies when a listing is requested without a positive page size.
-	defaultPageSize = 20
 )
 
 // likeEscaper makes the LIKE wildcard characters of a search term match literally.
@@ -114,7 +112,13 @@ func (r *UserRepository) HardDelete(ctx context.Context, id int64) error {
 }
 
 // List returns one page of the users matching f, newest first, with the total match count.
+// f.Page and f.PageSize must be positive: the handler clamps both, so any other value is a
+// programming error and yields apperror.Internal rather than a substituted default.
 func (r *UserRepository) List(ctx context.Context, f port.UserFilter) ([]domain.User, int64, error) {
+	if f.Page < 1 || f.PageSize < 1 {
+		return nil, 0, apperror.Internal("failed to list users",
+			fmt.Errorf("invalid page %d or page size %d: both must be positive", f.Page, f.PageSize))
+	}
 	var total int64
 	if err := r.filtered(ctx, f).Count(&total).Error; err != nil {
 		return nil, 0, apperror.Internal("failed to count users", err)
@@ -124,11 +128,10 @@ func (r *UserRepository) List(ctx context.Context, f port.UserFilter) ([]domain.
 		return users, 0, nil
 	}
 
-	page, size := normalizePage(f.Page, f.PageSize)
 	err := r.filtered(ctx, f).
 		Order("created_at DESC, id DESC").
-		Limit(size).
-		Offset((page - 1) * size).
+		Limit(f.PageSize).
+		Offset((f.Page - 1) * f.PageSize).
 		Find(&users).Error
 	if err != nil {
 		return nil, 0, apperror.Internal("failed to list users", err)
@@ -146,7 +149,6 @@ func (r *UserRepository) ExistsByEmail(ctx context.Context, email string) (bool,
 	return count > 0, nil
 }
 
-// filtered returns a users query narrowed by the status and search term of f.
 func (r *UserRepository) filtered(ctx context.Context, f port.UserFilter) *gorm.DB {
 	q := r.conn(ctx).Model(&domain.User{})
 	switch f.Status {
@@ -160,17 +162,6 @@ func (r *UserRepository) filtered(ctx context.Context, f port.UserFilter) *gorm.
 		q = q.Where("email ILIKE ? OR full_name ILIKE ?", pattern, pattern)
 	}
 	return q
-}
-
-// normalizePage returns a 1-based page and a positive page size.
-func normalizePage(page, size int) (int, int) {
-	if page < 1 {
-		page = 1
-	}
-	if size < 1 {
-		size = defaultPageSize
-	}
-	return page, size
 }
 
 // isUniqueViolation reports whether err is a unique constraint violation, either translated

@@ -69,6 +69,41 @@ func TestClientMeta_BoundsTheUserAgent(t *testing.T) {
 	assert.Equal(t, strings.Repeat("a", maxUserAgentBytes-1), ua)
 }
 
+func TestClientMeta_SanitizesTheUserAgent(t *testing.T) {
+	t.Parallel()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = newRequest(t, http.MethodGet, "/", nil)
+	c.Request.Header.Set("User-Agent", "agent\x00/1.0\r\nX-Injected: yes\xff")
+
+	assert.Equal(t, "agent/1.0X-Injected: yes�", clientMeta(c).UserAgent)
+}
+
+func TestSanitizeUserAgent(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"plain agent is untouched", "iam-test/1.0 (Macintosh; café)", "iam-test/1.0 (Macintosh; café)"},
+		{"empty stays empty", "", ""},
+		{"invalid utf-8 run becomes one replacement character", "agent\xff\xfe/1.0", "agent�/1.0"},
+		{"c0 controls and del are dropped", "agent\x00/1.0\r\n\tX: y\x7f", "agent/1.0X: y"},
+		{"c1 controls are dropped", "agent\u0085/1.0", "agent/1.0"},
+		{"controls are dropped before the cut", strings.Repeat("a", maxUserAgentBytes-1) + "\nbc", strings.Repeat("a", maxUserAgentBytes-1) + "b"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := sanitizeUserAgent(tt.in)
+
+			assert.Equal(t, tt.want, got)
+			assert.True(t, utf8.ValidString(got))
+			assert.LessOrEqual(t, len(got), maxUserAgentBytes)
+		})
+	}
+}
+
 func TestTruncateUTF8(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

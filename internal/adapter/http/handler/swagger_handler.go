@@ -17,7 +17,6 @@ import (
 // @license.name MIT
 // @license.url https://opensource.org/licenses/MIT
 
-// @host localhost:8080
 // @BasePath /
 // @schemes http https
 
@@ -27,6 +26,7 @@ import (
 // @description Type "Bearer" followed by a space and the access token.
 
 // RegisterSwagger mounts the Swagger UI at /swagger/*any; the spec is served from /swagger/doc.json.
+// The spec names no host, so the UI calls the API through the origin of its own page.
 func RegisterSwagger(router *gin.Engine) {
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler,
 		ginSwagger.URL("/swagger/doc.json"),
