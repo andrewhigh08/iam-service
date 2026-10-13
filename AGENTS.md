@@ -5,21 +5,23 @@ Guidance for AI coding agents and new contributors working in this repository.
 ## What this is
 
 `iam-service` is an Identity and Access Management microservice in Go:
-JWT (RS256) authentication with refresh tokens, Casbin RBAC, PostgreSQL (GORM),
-Redis (sessions, token revocation, login attempts), Prometheus metrics and
-OpenTelemetry tracing. The HTTP layer is Gin.
+JWT (RS256) authentication with refresh tokens, Casbin RBAC with policies kept in PostgreSQL
+through a small in-house adapter, PostgreSQL (GORM), Redis (sessions, token revocation, login
+attempts), Prometheus metrics and OpenTelemetry tracing. The HTTP layer is Gin.
 
 ## Layout
 
 ```
-cmd/api/            entry point (flags, signals) - keep it thin
+cmd/api/            entry point: config, signals, app.Run - keep it thin
 internal/app/       dependency wiring, router, graceful shutdown
 internal/domain/    entities and domain constants, no external deps and no HTTP tags
 internal/port/      interfaces between layers (services, repositories, stores, transactions)
-internal/service/   business logic; depends only on domain, port and internal/pkg
-internal/adapter/   infrastructure: http (gin handlers, middleware, DTOs), pgrepo (PostgreSQL), redisstore (Redis)
+internal/service/   business logic; depends only on domain, port, internal/pkg and the casbin enforcer interface
+internal/adapter/   infrastructure: http (gin handlers, middleware, DTOs), pgrepo (PostgreSQL),
+                    redisstore (Redis), casbinpg (Casbin policies in the casbin_rule table)
 internal/config/    env configuration (cleanenv) and its validation
 internal/pkg/       small shared packages (apperror, logger, metrics, telemetry, validator)
+configs/            Casbin model, Prometheus and Grafana configuration; RSA keys go to configs/keys (never committed)
 migrations/         SQL migrations, embedded and applied at startup
 test/integration/   testcontainers-based tests against real Postgres and Redis
 test/mocks/         generated gomock mocks (`make generate`)
@@ -27,8 +29,13 @@ docs/               swagger (generated) and ADRs
 ```
 
 Dependency rule: `service` must not import anything from `adapter` (pinned by a test).
-Transactions cross layers via `port.TxManager` and `context.Context`, never via `*gorm.DB`.
+Transactions cross layers via `port.TxManager` and `context.Context`, never via `*gorm.DB`;
+repositories join the transaction found in the context and otherwise run on the pool, so anything
+that must be atomic is wrapped in `WithinTx` by the service.
 Repository writes are intent-specific (`UpdatePassword`, `SetBlocked`); never add a full-row update.
+Health checks reach PostgreSQL and Redis through a `Pinger` interface, not through driver types.
+Casbin policies are persisted by `internal/adapter/casbinpg`; do not bring `casbin/gorm-adapter`
+back, it links MySQL, SQL Server, ClickHouse and SQLite drivers into the binary.
 
 ## Commands
 
@@ -43,8 +50,10 @@ make generate          regenerate mocks and swagger docs after changing interfac
 make build             static binary in bin/
 ```
 
-CI runs `go mod tidy -diff`, lint, unit and integration tests, gosec, govulncheck,
-Docker build and Trivy. Keep all of it green.
+CI runs `go mod tidy -diff`, a generated-code freshness check, lint, unit and integration tests,
+gosec, govulncheck, Docker build and Trivy. gosec (high severity and confidence findings) and Trivy
+(unfixed CRITICAL/HIGH vulnerabilities in the image) block the image publish; govulncheck is
+advisory. Keep all of it green.
 
 ## Conventions
 
@@ -53,6 +62,9 @@ Docker build and Trivy. Keep all of it green.
 - Errors cross layer boundaries as `*apperror.AppError`; HTTP handlers map them with `response.Error`.
 - Security checks fail closed: when Redis cannot answer, token validation and the login lockout
   refuse the request (503) rather than proceed unprotected. Keep it that way.
+- Login answers a blocked account exactly like a wrong password ("invalid credentials") and audits
+  the reason; only `/auth/refresh` and the authenticated password change say "account is blocked".
+- Never log passwords, tokens or hashes.
 - Use `any`, not `interface{}`.
 - Every exported identifier has a doc comment. Do not comment what the code already says.
 - New behaviour needs a unit test; anything touching Postgres or Redis also needs coverage in `test/integration`.

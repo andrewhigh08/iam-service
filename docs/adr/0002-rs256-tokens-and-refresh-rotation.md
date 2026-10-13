@@ -13,13 +13,16 @@ refresh token must not grant indefinite access.
   is published at `/.well-known/jwks.json` with a stable `kid`.
 - Verification pins the algorithm to RS256 and requires `exp`, `iat` and `iss`. Tokens carry `jti`
   (for blacklisting) and `sid` (the session they belong to).
-- Refresh tokens are 32 random bytes. Redis stores only `sha256(token)` together with the user id,
-  creation time, IP and user agent. The session id shown to users is a prefix of that hash.
+- Refresh tokens are 32 random bytes. Redis stores only `sha256(token)`, as the key of a hash with
+  the fields `uid`, `sid`, `created_at`, `expires_at`, `ip`, `ua`, `jti` and `access_exp`: the user,
+  the session id, the session start and expiry, the client address and a sanitized User-Agent, and
+  the `jti` and expiry of the access token issued with the session. The session id shown to users is
+  a prefix of that hash.
 - `/auth/refresh` rotates: the presented token is consumed in one atomic Redis script and a new
   pair is issued, so a token presented twice at the same moment yields exactly one session. The
-  consumed hash is remembered for the refresh TTL; a later presentation of it is reuse detection:
-  the request is rejected and every session of the user is revoked, because either the legitimate
-  client or a thief holds the successor.
+  consumed hash is remembered for the refresh TTL as a single-use tombstone; a later presentation of
+  it is reuse detection: the request is rejected, every session of the user is revoked and the
+  tombstone is removed, because either the legitimate client or a thief holds the successor.
 - The session start time survives rotation and bounds the chain: a session older than
   `JWT_SESSION_MAX_AGE` cannot be refreshed again, and a session that started before the user's
   last password change is rejected as well.

@@ -9,9 +9,8 @@ acknowledgement within a few days.
 
 ## Scope
 
-The service is a reference implementation of an IAM backend. The security model is described in
-[docs/adr](docs/adr) and in the README section "Безопасность: принятые решения". Reports about the
-following are especially welcome:
+The service is an IAM backend. The security model is described in [docs/adr](docs/adr) and in
+the security section of the README. Reports about the following are especially welcome:
 
 - token validation, revocation and session handling;
 - authorization bypass (RBAC);

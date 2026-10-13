@@ -19,6 +19,10 @@ on an external gateway.
   failed login, so a stolen access token cannot be used to guess the password.
 - The lockout fails closed: when Redis cannot report or record the state, the credential check
   answers 503 instead of proceeding uncounted.
+- Login answers a blocked account exactly like a wrong password ("invalid credentials"), so the
+  response reveals neither whether the account exists nor whether it is blocked; the audit entry
+  records the reason. `/auth/refresh` and the authenticated password change say "account is
+  blocked", because the caller has already proven possession of a valid credential.
 - Client IP comes from the socket unless the request arrives from an address listed in
   `TRUSTED_PROXIES`.
 

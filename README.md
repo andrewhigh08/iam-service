@@ -4,6 +4,13 @@
 [![Go](https://img.shields.io/github/go-mod/go-version/andrewhigh08/iam-service)](go.mod)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+**Summary.** iam-service is an Identity and Access Management backend written in Go: it issues and verifies
+RS256 JWT access tokens (public keys at `/.well-known/jwks.json`), rotates refresh tokens, enforces Casbin RBAC,
+locks out brute force and keeps an audit log. Stack: Go 1.26, Gin, GORM, PostgreSQL, Redis, Casbin, Prometheus,
+OpenTelemetry. `make up` starts the API together with PostgreSQL, Redis, Prometheus, Grafana and Jaeger through
+Docker Compose; the admin login example and the configuration reference are below. The design decisions are
+recorded in [docs/adr](docs/adr). The rest of this document is in Russian.
+
 Сервис аутентификации и управления доступом (Identity and Access Management) на Go.
 Выдаёт и проверяет JWT, хранит сессии, применяет ролевую модель доступа и ведёт журнал аудита.
 Рассчитан на роль «центрального IAM» для группы внутренних сервисов: они проверяют access-токены
@@ -17,15 +24,18 @@
   Повторное предъявление уже использованного токена считается кражей: все сессии пользователя отзываются.
   В Redis хранится только SHA-256 токена. Сессия живёт не дольше `JWT_SESSION_MAX_AGE`, сколько бы её ни обновляли.
 - Отзыв: чёрный список по `jti` при logout и отзыве сессии, отметка «все токены до момента T недействительны» при
-  logout со всех устройств, смене пароля и блокировке пользователя.
+  logout со всех устройств, смене пароля, блокировке пользователя и повторном использовании refresh-токена.
 - Временные пароли при создании пользователя и срок жизни пароля с принудительной сменой.
-- Защита от перебора: лимит попыток входа на IP и временная блокировка аккаунта после N ошибок;
+- Защита от перебора: лимит на IP для входа и смены пароля (`/auth/login`, `/auth/change-password`,
+  `/api/v1/change-password`) и временная блокировка аккаунта после N ошибок;
   неверный текущий пароль при смене пароля считается так же, как неудачный вход.
-  Ответы на неверный email и неверный пароль неразличимы, в том числе по времени (bcrypt выполняется всегда).
+  Ответы на неверный email, неверный пароль и заблокированный аккаунт при входе неразличимы, в том числе
+  по времени (bcrypt выполняется всегда); причина отказа фиксируется в журнале аудита.
 - Список активных сессий и отзыв любой из них.
 
 **Авторизация**
-- RBAC на Casbin: роли `admin`, `analyst`, `viewer`, политики хранятся в PostgreSQL.
+- RBAC на Casbin: роли `admin`, `analyst`, `viewer`; политики хранятся в PostgreSQL в таблице `casbin_rule`
+  через небольшой собственный адаптер `internal/adapter/casbinpg`.
 - Проверка прав в middleware по паре «ресурс, действие».
 - Опциональная синхронизация политик между репликами через Redis (casbin redis-watcher).
 
@@ -39,13 +49,15 @@
 **Эксплуатация**
 - Конфигурация через переменные окружения с валидацией при старте.
 - Миграции схемы встроены в бинарник и применяются при запуске.
-- Метрики Prometheus, трассировка OpenTelemetry (HTTP, PostgreSQL, Redis), структурированные логи с
-  `request_id` и `trace_id`, liveness/readiness-пробы, graceful shutdown.
+- Метрики Prometheus, трассировка OpenTelemetry (HTTP, PostgreSQL, Redis), структурированные логи
+  (в записях, сделанных в рамках запроса, есть `request_id`, `user_id` и `trace_id`), liveness/readiness-пробы,
+  graceful shutdown.
 - Docker-образ без root, `docker compose` со всем стеком наблюдаемости, готовый дашборд Grafana.
 
 ## Быстрый старт
 
-Нужны Docker и Docker Compose v2. Для работы вне compose: PostgreSQL 14+ и Redis 7+ (используются команды `EXPIRE ... NX|GT`).
+Нужны Docker и Docker Compose v2. Для работы вне compose нужны PostgreSQL и Redis 7.0+ (используются команды
+`EXPIRE ... NX|GT`); compose-стек и интеграционные тесты работают на PostgreSQL 17 и Redis 8.
 
 ```bash
 git clone https://github.com/andrewhigh08/iam-service.git
@@ -87,10 +99,11 @@ curl -s http://localhost:8080/auth/login \
 
 ## Архитектура
 
-Проект построен по принципу «порты и адаптеры»: бизнес-логика в `internal/service` зависит только от
-интерфейсов из `internal/port` и доменных типов из `internal/domain`. Реализации интерфейсов живут в
-`internal/adapter`, а сборка зависимостей и HTTP-роутер в `internal/app`. Направление зависимостей
-проверяется тестом: пакет `service` не может импортировать ничего из `adapter`.
+Проект построен по принципу «порты и адаптеры»: бизнес-логика в `internal/service` зависит от интерфейсов из
+`internal/port`, доменных типов из `internal/domain` и, в сервисе авторизации, от интерфейса enforcer'а Casbin
+(`casbin.IEnforcer`), но не от конкретных адаптеров. Реализации интерфейсов живут в `internal/adapter`
+(`http`, `pgrepo`, `redisstore`, `casbinpg`), а сборка зависимостей и HTTP-роутер в `internal/app`.
+Направление зависимостей проверяется тестом: пакет `service` не может импортировать ничего из `adapter`.
 
 ```mermaid
 flowchart LR
@@ -99,14 +112,17 @@ flowchart LR
     svc -.-> port[(port<br/>интерфейсы)]
     port -.-> pg[adapter/pgrepo<br/>users, audit_logs, транзакции]
     port -.-> rds[adapter/redisstore<br/>сессии, отзыв токенов, попытки входа]
-    svc --> casbin[Casbin enforcer<br/>политики в PostgreSQL]
+    svc --> casbin[Casbin enforcer<br/>политика в памяти]
+    casbin --> cpg[adapter/casbinpg<br/>таблица casbin_rule]
     pg --> db[(PostgreSQL)]
+    cpg --> db
     rds --> redis[(Redis)]
-    casbin --> db
 ```
 
-Транзакции пересекают границу слоёв через `port.TxManager`: сервис вызывает `WithinTx(ctx, fn)`,
-а репозитории достают транзакцию из `context.Context`. Сервисы не знают о GORM.
+Транзакции пересекают границу слоёв через `port.TxManager`: сервис вызывает `WithinTx(ctx, fn)`, а репозитории
+присоединяются к транзакции из `context.Context` и без неё работают на пуле соединений, поэтому атомарность
+нескольких вызовов репозиториев обеспечивает сервис, обернувший их в `WithinTx`. Сервисы не знают о GORM.
+Пробы готовности обращаются к PostgreSQL и Redis через интерфейс `Pinger`, а не к драйверам напрямую.
 
 Поток входа:
 
@@ -135,16 +151,19 @@ sequenceDiagram
 Структура репозитория:
 
 ```
-cmd/api/              точка входа
+cmd/api/              точка входа: конфигурация, сигналы, app.Run
 internal/app/         сборка зависимостей, роутер, запуск и остановка
 internal/domain/      сущности и доменные константы
 internal/port/        интерфейсы между слоями
 internal/service/     бизнес-логика
-internal/adapter/     http, postgres, redis
+internal/adapter/     http (обработчики, middleware, DTO), pgrepo (PostgreSQL), redisstore (Redis),
+                      casbinpg (политики Casbin в PostgreSQL)
 internal/config/      конфигурация
 internal/pkg/         apperror, logger, metrics, telemetry, validator
+configs/              модель Casbin, конфигурация Prometheus и Grafana; ключи в configs/keys не коммитятся
 migrations/           SQL-миграции (golang-migrate, встроены через embed)
 test/integration/     тесты на реальных PostgreSQL и Redis (testcontainers)
+test/mocks/           gomock-моки портов (генерируются, `make generate`)
 docs/                 swagger (генерируется), ADR
 ```
 
@@ -152,16 +171,19 @@ docs/                 swagger (генерируется), ADR
 
 ## API
 
-Все ответы в едином конверте `{"success": bool, "data": ..., "error": {"code", "message", "details"}, "meta": ...}`.
+Ответы `/auth/*` и `/api/*` приходят в едином конверте
+`{"success": bool, "data": ..., "error": {"code", "message", "details"}, "meta": ...}`.
+Исключения: `/.well-known/jwks.json` отдаёт JWK Set как есть, `/health/*` отвечает собственной структурой
+со статусом и проверками, `/metrics` отдаёт текстовый формат Prometheus, `/swagger/*` отдаёт HTML.
 
 | Метод | Путь | Доступ | Описание |
 |-------|------|--------|----------|
 | `POST` | `/auth/login` | публичный | Вход, выдаёт пару токенов или требование сменить пароль |
 | `POST` | `/auth/refresh` | публичный | Обновление пары токенов с ротацией refresh-токена |
-| `POST` | `/auth/logout` | публичный | Отзыв refresh-токена и access-токена из заголовка |
-| `POST` | `/auth/change-password` | публичный | Смена временного или просроченного пароля |
+| `POST` | `/auth/logout` | публичный | Отзыв refresh-токена и access-токена; access-токен принимается в теле (`access_token`) или в заголовке `Authorization` |
+| `POST` | `/auth/change-password` | публичный | Смена временного или просроченного пароля, выдаёт пару токенов |
 | `GET` | `/.well-known/jwks.json` | публичный | Публичные ключи для проверки подписи |
-| `POST` | `/api/v1/change-password` | JWT | Смена пароля, отзывает остальные сессии |
+| `POST` | `/api/v1/change-password` | JWT | Смена пароля: отзывает все сессии, включая текущую, и возвращает новую пару токенов |
 | `POST` | `/api/v1/logout-all` | JWT | Выход со всех устройств |
 | `GET` | `/api/v1/sessions` | JWT | Активные сессии текущего пользователя |
 | `DELETE` | `/api/v1/sessions/:id` | JWT | Отзыв сессии |
@@ -190,24 +212,36 @@ docs/                 swagger (генерируется), ADR
 
 - **RS256 вместо HS256.** Приватный ключ есть только у IAM, остальные сервисы проверяют токены по JWKS.
   При проверке допускается только алгоритм RS256, обязательны `exp`, `iat` и `iss`.
-- **Короткие access-токены (15 минут по умолчанию) и отзыв.** Logout заносит `jti` в чёрный список
-  до истечения токена. Logout со всех устройств, смена пароля и блокировка ставят отметку
-  «токены, выданные до T, недействительны». Проверка этих отметок делается на каждом запросе.
+- **Короткие access-токены (15 минут по умолчанию) и отзыв.** Logout и отзыв сессии заносят `jti` в чёрный
+  список до `exp` токена плюс 30 секунд допуска на расхождение часов. Logout со всех устройств, смена пароля,
+  блокировка и повторное использование refresh-токена ставят отметку «токены, выданные до T, недействительны»;
+  отметка записывается до удаления сессий. Чёрный список и отметки проверяются на каждом запросе к IAM:
+  в обычном случае это одно pipelined-чтение из Redis, второе обращение нужно только если токен выдан
+  в ту же секунду, что и отметка. Сервисы, которые проверяют токены локально по JWKS, об отзыве не узнают
+  и принимают отозванный токен до его `exp`, поэтому `JWT_ACCESS_TOKEN_TTL` ограничивает это окно.
 - **Fail closed.** Если Redis недоступен, защищённые запросы получают 503, а не проходят без проверки
   отзыва; проверка пароля при входе и смене пароля тоже отвечает 503, а не работает без учёта попыток.
   Для IAM доступность не важнее корректности. Redis должен работать без вытеснения ключей
   (`maxmemory-policy noeviction`), иначе отметки об отзыве могут быть потеряны; сервис проверяет это при старте
-  и пишет ошибку в лог.
+  и пишет ошибку в лог. Redis без персистентности при перезапуске теряет чёрный список и отметки: токены,
+  отозванные за последние `JWT_ACCESS_TOKEN_TTL`, снова станут действительными до своего `exp`; включайте AOF
+  и держите время жизни access-токена коротким.
 - **Refresh-токены хранятся только в виде хеша**, ротируются при каждом обновлении, привязаны к сессии
-  с IP и User-Agent. Отзыв сессии и ротация заносят в чёрный список и access-токен этой сессии.
+  с IP и User-Agent (значение User-Agent перед сохранением очищается и обрезается по длине). Отзыв сессии
+  и ротация заносят в чёрный список и access-токен этой сессии. Запись об использованном refresh-токене
+  одноразовая: она снимается при первом обнаружении повторного использования.
 - **Ключи RSA не короче 2048 бит**; при проверке токенов допускается расхождение часов реплик до 30 секунд,
   реплики должны синхронизировать время (NTP).
-- **Единый ответ на неверные учётные данные** и bcrypt для несуществующих пользователей, чтобы не
-  раскрывать существование аккаунта ни текстом, ни временем ответа.
+- **Единый ответ на неверные учётные данные.** Неверный email, неверный пароль и заблокированный аккаунт
+  получают при входе один и тот же ответ «invalid credentials», а bcrypt выполняется и для несуществующих
+  пользователей, чтобы не раскрывать существование и состояние аккаунта ни текстом, ни временем ответа;
+  причина отказа фиксируется в журнале аудита. `/auth/refresh` и смена пароля по access-токену отвечают
+  заблокированному пользователю «account is blocked».
 - **Блокировка аккаунта** после `LOCKOUT_MAX_ATTEMPTS` ошибок на `LOCKOUT_DURATION`, плюс отдельный
-  лимит на IP для `/auth/login` и `/auth/change-password`.
-- **Политика паролей** применяется в сервисном слое для всех способов установки пароля, включая `ADMIN_PASSWORD`:
-  от 8 до 128 символов и не более 72 байт в UTF-8 (предел bcrypt), строчные и заглавные буквы, цифры,
+  лимит на IP для `/auth/login`, `/auth/change-password` и `/api/v1/change-password`.
+- **Политика паролей** применяется в сервисном слое при создании пользователя и при каждой смене пароля;
+  `ADMIN_PASSWORD` проверяется той же политикой при загрузке конфигурации, когда `DEV_MODE=false`.
+  Правила: от 8 до 128 символов и не более 72 байт в UTF-8 (предел bcrypt), строчные и заглавные буквы, цифры,
   спецсимволы, запрет распространённых паролей.
 - **Заголовки безопасности** на всех ответах, `Cache-Control: no-store` для `/auth` и `/api`,
   ограничение размера тела запроса, настраиваемый список доверенных прокси для корректного определения IP.
@@ -232,8 +266,8 @@ docs/                 swagger (генерируется), ADR
 | `JWT_REFRESH_TOKEN_TTL` | `168h` | Время жизни refresh-токена и сессии |
 | `JWT_SESSION_MAX_AGE` | `720h` | Предельный возраст сессии при любом числе обновлений, `0` отключает |
 | `JWT_ISSUER` | `iam-service` | Значение `iss` |
-| `DEV_MODE` | `false` | В режиме разработки ключи генерируются при отсутствии, а пароль администратора может быть пустым |
-| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | `admin@example.com`, пусто | Первый администратор; существующему аккаунту с этим email выдаётся роль `admin`. Вне `DEV_MODE` пароль обязателен и проверяется политикой паролей; пустой `ADMIN_EMAIL` отключает создание |
+| `DEV_MODE` | `false` | В режиме разработки ключи генерируются при отсутствии; пустой `ADMIN_PASSWORD` становится `Admin123!`, и политика паролей к нему не применяется |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | `admin@example.com`, пусто | Первый администратор; существующему аккаунту с этим email выдаётся роль `admin`. При `DEV_MODE=false` пароль обязателен и проверяется политикой паролей при загрузке конфигурации; пустой `ADMIN_EMAIL` отключает создание |
 | `CASBIN_MODEL_PATH` | `configs/casbin_model.conf` | Модель Casbin |
 | `AUTHZ_WATCHER_ENABLED` | `false` | Синхронизация политик между репликами через Redis |
 | `LOCKOUT_MAX_ATTEMPTS`, `LOCKOUT_DURATION` | `5`, `15m` | Блокировка аккаунта после неудачных попыток |
@@ -244,8 +278,15 @@ docs/                 swagger (генерируется), ADR
 | `TRUSTED_PROXIES` | пусто | Прокси, чьим `X-Forwarded-For` можно верить |
 | `OTEL_ENABLED`, `OTEL_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_ENVIRONMENT` | `false`, `localhost:4317`, `iam-service`, `development` | Трассировка (OTLP gRPC) |
 
-Для production: `DEV_MODE=false`, заранее сгенерированные ключи (`openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048`),
-задать `ADMIN_PASSWORD` и `TRUSTED_PROXIES`. Все значения проверяются при старте: каждое сообщение об ошибке называет переменную.
+Для production: `DEV_MODE=false`, заранее сгенерированная пара ключей, заданные `ADMIN_PASSWORD` и `TRUSTED_PROXIES`.
+Все значения проверяются при старте: каждое сообщение об ошибке называет переменную. Ключи:
+
+```bash
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out private.pem
+openssl pkey -in private.pem -pubout -out public.pem
+```
+
+Пути к файлам задаются через `JWT_PRIVATE_KEY_PATH` и `JWT_PUBLIC_KEY_PATH` (по умолчанию `configs/keys/`).
 
 ## Разработка
 
@@ -259,8 +300,9 @@ make generate          # перегенерировать моки и swagger п
 make build             # статический бинарник в bin/
 ```
 
-Нужны Go 1.26 и Docker для интеграционных тестов. golangci-lint, моки и swagger запускаются через `go run`,
-отдельно ставить ничего не требуется. Правила для контрибьюторов и ИИ-агентов собраны в [AGENTS.md](AGENTS.md).
+Нужны Go 1.26 и Docker для интеграционных тестов. Моки и swagger запускаются через `go run`; `make lint`
+использует установленный golangci-lint, а без него запускает его через `go run`, так что отдельно ставить
+ничего не требуется. Правила для контрибьюторов и ИИ-агентов собраны в [AGENTS.md](AGENTS.md).
 
 ## Тестирование
 
@@ -273,8 +315,10 @@ make build             # статический бинарник в bin/
   после неудачных попыток входа и смены пароля, записи аудита и их чтение по API, применение миграций вверх и вниз.
 
 CI (GitHub Actions) гоняет `go mod tidy -diff`, проверку свежести сгенерированного кода, golangci-lint,
-юнит- и интеграционные тесты, gosec и govulncheck, сборку образа и сканирование Trivy. Образ публикуется в
-GitHub Container Registry при пуше в `main` и по тегам `v*`.
+юнит- и интеграционные тесты, gosec, govulncheck, сборку образа и сканирование Trivy. gosec (находки высокой
+серьёзности и уверенности) и Trivy (неисправленные уязвимости CRITICAL и HIGH в образе) блокируют публикацию
+образа; govulncheck только информирует и сборку не останавливает. Образ публикуется в GitHub Container Registry
+при пуше в `main` и по тегам `v*`.
 
 ## Наблюдаемость
 
@@ -283,7 +327,8 @@ GitHub Container Registry при пуше в `main` и по тегам `v*`.
   Метка `path` содержит шаблон маршрута, а не конкретный URL.
 - **Трассировка**: при `OTEL_ENABLED=true` спаны создаются для HTTP-запросов, запросов к PostgreSQL и Redis
   и отправляются по OTLP (в compose-стеке в Jaeger).
-- **Логи**: JSON через `log/slog`, в каждой записи `request_id`, при наличии `user_id`, `trace_id` и `span_id`.
+- **Логи**: JSON через `log/slog`; в записях, сделанных в рамках запроса, есть `request_id`, при наличии
+  `user_id`, `trace_id` и `span_id`.
 - **Grafana**: дашборд «IAM Service» подключается автоматически из `configs/grafana`.
 
 ## Чего нет и что можно добавить
