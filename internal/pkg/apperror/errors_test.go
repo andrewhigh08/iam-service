@@ -60,7 +60,7 @@ func TestAppError_WithDetails(t *testing.T) {
 		Message: "validation failed",
 	}
 
-	details := map[string]interface{}{
+	details := map[string]any{
 		"field": "email",
 		"error": "invalid format",
 	}
@@ -105,7 +105,7 @@ func TestNotFound(t *testing.T) {
 }
 
 func TestValidationError(t *testing.T) {
-	details := map[string]interface{}{
+	details := map[string]any{
 		"email": "invalid format",
 	}
 	appErr := ValidationError("validation failed", details)

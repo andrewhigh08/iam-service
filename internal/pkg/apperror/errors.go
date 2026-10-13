@@ -36,11 +36,11 @@ const (
 //   - Details: Additional error details
 //   - Err: Wrapped underlying error
 type AppError struct {
-	Code       string                 `json:"code"`              // Error code
-	Message    string                 `json:"message"`           // Error message
-	HTTPStatus int                    `json:"-"`                 // HTTP status
-	Details    map[string]interface{} `json:"details,omitempty"` // Additional details
-	Err        error                  `json:"-"`                 // Wrapped error
+	Code       string         `json:"code"`              // Error code
+	Message    string         `json:"message"`           // Error message
+	HTTPStatus int            `json:"-"`                 // HTTP status
+	Details    map[string]any `json:"details,omitempty"` // Additional details
+	Err        error          `json:"-"`                 // Wrapped error
 }
 
 // Error implements the error interface.
@@ -57,7 +57,7 @@ func (e *AppError) Unwrap() error {
 }
 
 // WithDetails adds details to the error and returns the modified error.
-func (e *AppError) WithDetails(details map[string]interface{}) *AppError {
+func (e *AppError) WithDetails(details map[string]any) *AppError {
 	e.Details = details
 	return e
 }
@@ -78,12 +78,12 @@ func New(code, message string, httpStatus int) *AppError {
 }
 
 // NotFound creates a not found error for a specific resource.
-func NotFound(resource string, id interface{}) *AppError {
+func NotFound(resource string, id any) *AppError {
 	return &AppError{
 		Code:       CodeNotFound,
 		Message:    fmt.Sprintf("%s not found", resource),
 		HTTPStatus: http.StatusNotFound,
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"resource": resource,
 			"id":       id,
 		},
@@ -91,7 +91,7 @@ func NotFound(resource string, id interface{}) *AppError {
 }
 
 // ValidationError creates a validation error with details.
-func ValidationError(message string, details map[string]interface{}) *AppError {
+func ValidationError(message string, details map[string]any) *AppError {
 	return &AppError{
 		Code:       CodeValidation,
 		Message:    message,
@@ -125,12 +125,12 @@ func Forbidden(message string) *AppError {
 }
 
 // Conflict creates a resource conflict error (e.g., duplicate entry).
-func Conflict(resource, field string, value interface{}) *AppError {
+func Conflict(resource, field string, value any) *AppError {
 	return &AppError{
 		Code:       CodeConflict,
 		Message:    fmt.Sprintf("%s with this %s already exists", resource, field),
 		HTTPStatus: http.StatusConflict,
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"resource": resource,
 			"field":    field,
 			"value":    value,
@@ -163,7 +163,7 @@ func TooManyRequests(message string, retryAfter int) *AppError {
 		Code:       CodeTooManyRequests,
 		Message:    message,
 		HTTPStatus: http.StatusTooManyRequests,
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"retry_after_seconds": retryAfter, // Retry after X seconds
 		},
 	}
@@ -184,7 +184,7 @@ func PasswordExpired(userID int64) *AppError {
 		Code:       CodePasswordExpired,
 		Message:    "password has expired and must be changed",
 		HTTPStatus: http.StatusForbidden,
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"user_id":                 userID,
 			"require_password_change": true,
 		},

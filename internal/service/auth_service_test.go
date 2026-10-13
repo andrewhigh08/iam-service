@@ -96,22 +96,22 @@ type MockAuditService struct {
 	mock.Mock
 }
 
-func (m *MockAuditService) LogAction(ctx context.Context, userID int64, action, resourceType, resourceID string, details map[string]interface{}) error {
+func (m *MockAuditService) LogAction(ctx context.Context, userID int64, action, resourceType, resourceID string, details map[string]any) error {
 	args := m.Called(ctx, userID, action, resourceType, resourceID, details)
 	return args.Error(0)
 }
 
-func (m *MockAuditService) LogActionTx(ctx context.Context, tx *gorm.DB, userID int64, action, resourceType, resourceID string, details map[string]interface{}) error {
+func (m *MockAuditService) LogActionTx(ctx context.Context, tx *gorm.DB, userID int64, action, resourceType, resourceID string, details map[string]any) error {
 	args := m.Called(ctx, tx, userID, action, resourceType, resourceID, details)
 	return args.Error(0)
 }
 
-func (m *MockAuditService) LogActionWithContext(ctx context.Context, userID int64, action, resourceType, resourceID string, details map[string]interface{}, ipAddress, userAgent string) error {
+func (m *MockAuditService) LogActionWithContext(ctx context.Context, userID int64, action, resourceType, resourceID string, details map[string]any, ipAddress, userAgent string) error {
 	args := m.Called(ctx, userID, action, resourceType, resourceID, details, ipAddress, userAgent)
 	return args.Error(0)
 }
 
-func (m *MockAuditService) LogActionWithContextTx(ctx context.Context, tx *gorm.DB, userID int64, action, resourceType, resourceID string, details map[string]interface{}, ipAddress, userAgent string) error {
+func (m *MockAuditService) LogActionWithContextTx(ctx context.Context, tx *gorm.DB, userID int64, action, resourceType, resourceID string, details map[string]any, ipAddress, userAgent string) error {
 	args := m.Called(ctx, tx, userID, action, resourceType, resourceID, details, ipAddress, userAgent)
 	return args.Error(0)
 }

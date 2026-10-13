@@ -64,12 +64,12 @@ func TestAuthHandler_Login_Success(t *testing.T) {
 	// Assertions
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 
 	assert.True(t, resp["success"].(bool))
-	data := resp["data"].(map[string]interface{})
+	data := resp["data"].(map[string]any)
 	assert.Equal(t, "jwt-token-123", data["access_token"])
 	assert.Equal(t, "refresh-token-123", data["refresh_token"])
 	assert.Equal(t, "Bearer", data["token_type"])
@@ -101,12 +101,12 @@ func TestAuthHandler_Login_OTPFlow(t *testing.T) {
 	// Assertions
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 
 	assert.True(t, resp["success"].(bool))
-	data := resp["data"].(map[string]interface{})
+	data := resp["data"].(map[string]any)
 	assert.True(t, data["require_password_change"].(bool))
 	assert.Equal(t, float64(42), data["user_id"])
 	assert.Contains(t, data["message"], "One-time password")
@@ -138,7 +138,7 @@ func TestAuthHandler_Login_InvalidRequest(t *testing.T) {
 
 			assert.Equal(t, http.StatusBadRequest, w.Code)
 
-			var resp map[string]interface{}
+			var resp map[string]any
 			err := json.Unmarshal(w.Body.Bytes(), &resp)
 			require.NoError(t, err)
 			assert.False(t, resp["success"].(bool))
@@ -164,7 +164,7 @@ func TestAuthHandler_Login_AuthError(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	assert.False(t, resp["success"].(bool))
@@ -189,12 +189,12 @@ func TestAuthHandler_Login_AccountLocked(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	assert.False(t, resp["success"].(bool))
 
-	errData := resp["error"].(map[string]interface{})
+	errData := resp["error"].(map[string]any)
 	assert.Contains(t, errData["message"], "temporarily locked")
 }
 
@@ -242,7 +242,7 @@ func TestAuthHandler_ChangePassword_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	assert.True(t, resp["success"].(bool))
@@ -318,15 +318,15 @@ func TestAuthHandler_ChangePassword_WeakPassword(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	assert.False(t, resp["success"].(bool))
 
 	// Check that error contains validation details
-	errData := resp["error"].(map[string]interface{})
-	details := errData["details"].(map[string]interface{})
-	errors := details["errors"].([]interface{})
+	errData := resp["error"].(map[string]any)
+	details := errData["details"].(map[string]any)
+	errors := details["errors"].([]any)
 	assert.NotEmpty(t, errors)
 }
 
@@ -356,12 +356,12 @@ func TestAuthHandler_FirstTimePasswordChange_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	assert.True(t, resp["success"].(bool))
 
-	data := resp["data"].(map[string]interface{})
+	data := resp["data"].(map[string]any)
 	assert.Equal(t, "new-jwt-token", data["access_token"])
 	assert.Equal(t, "new-refresh-token", data["refresh_token"])
 	assert.Equal(t, "Bearer", data["token_type"])
@@ -383,7 +383,7 @@ func TestAuthHandler_FirstTimePasswordChange_WeakPassword(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	assert.False(t, resp["success"].(bool))
@@ -511,7 +511,7 @@ func TestAuthHandler_AuthMiddleware_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	assert.Equal(t, float64(123), resp["user_id"])
@@ -722,11 +722,11 @@ func TestAuthHandler_Logout_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	assert.True(t, resp["success"].(bool))
-	data := resp["data"].(map[string]interface{})
+	data := resp["data"].(map[string]any)
 	assert.Contains(t, data["message"], "Logged out successfully")
 }
 
@@ -748,7 +748,7 @@ func TestAuthHandler_Logout_WithAccessToken(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	assert.True(t, resp["success"].(bool))
@@ -821,11 +821,11 @@ func TestAuthHandler_LogoutAll_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	assert.True(t, resp["success"].(bool))
-	data := resp["data"].(map[string]interface{})
+	data := resp["data"].(map[string]any)
 	assert.Contains(t, data["message"], "Logged out from all devices")
 }
 
@@ -890,11 +890,11 @@ func TestAuthHandler_RefreshToken_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	assert.True(t, resp["success"].(bool))
-	data := resp["data"].(map[string]interface{})
+	data := resp["data"].(map[string]any)
 	assert.Equal(t, "new-access-token-123", data["access_token"])
 	assert.Equal(t, "Bearer", data["token_type"])
 }
@@ -976,7 +976,7 @@ func TestAuthHandler_AuthMiddleware_BlacklistedToken(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	assert.False(t, resp["success"].(bool))

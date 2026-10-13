@@ -33,17 +33,17 @@ func NewAuditService(auditRepo port.AuditLogRepository, log *logger.Logger) *Aud
 }
 
 // LogAction logs an action to the audit trail.
-func (s *AuditService) LogAction(ctx context.Context, userID int64, action, resourceType, resourceID string, details map[string]interface{}) error {
+func (s *AuditService) LogAction(ctx context.Context, userID int64, action, resourceType, resourceID string, details map[string]any) error {
 	return s.LogActionWithContext(ctx, userID, action, resourceType, resourceID, details, "", "")
 }
 
 // LogActionTx logs an action within an existing transaction.
-func (s *AuditService) LogActionTx(ctx context.Context, tx *gorm.DB, userID int64, action, resourceType, resourceID string, details map[string]interface{}) error {
+func (s *AuditService) LogActionTx(ctx context.Context, tx *gorm.DB, userID int64, action, resourceType, resourceID string, details map[string]any) error {
 	return s.LogActionWithContextTx(ctx, tx, userID, action, resourceType, resourceID, details, "", "")
 }
 
 // LogActionWithContext logs an action with IP address and user agent.
-func (s *AuditService) LogActionWithContext(ctx context.Context, userID int64, action, resourceType, resourceID string, details map[string]interface{}, ipAddress, userAgent string) error {
+func (s *AuditService) LogActionWithContext(ctx context.Context, userID int64, action, resourceType, resourceID string, details map[string]any, ipAddress, userAgent string) error {
 	log := s.logger.WithContext(ctx)
 
 	// Serialize details to JSON
@@ -85,7 +85,7 @@ func (s *AuditService) LogActionWithContext(ctx context.Context, userID int64, a
 
 // LogActionWithContextTx logs an action with context within a transaction.
 // Use this when audit log must be part of a larger atomic operation.
-func (s *AuditService) LogActionWithContextTx(ctx context.Context, tx *gorm.DB, userID int64, action, resourceType, resourceID string, details map[string]interface{}, ipAddress, userAgent string) error {
+func (s *AuditService) LogActionWithContextTx(ctx context.Context, tx *gorm.DB, userID int64, action, resourceType, resourceID string, details map[string]any, ipAddress, userAgent string) error {
 	log := s.logger.WithContext(ctx)
 
 	// Serialize details to JSON

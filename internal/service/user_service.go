@@ -99,7 +99,7 @@ func (s *UserService) CreateUser(ctx context.Context, req *domain.CreateUserRequ
 		createdUser = user
 
 		// Audit log within transaction
-		return s.audit.LogActionWithContextTx(ctx, tx, createdBy, "user.create", "user", fmt.Sprintf("%d", user.ID), map[string]interface{}{
+		return s.audit.LogActionWithContextTx(ctx, tx, createdBy, "user.create", "user", fmt.Sprintf("%d", user.ID), map[string]any{
 			"email":         user.Email,
 			"full_name":     user.FullName,
 			"role":          req.Role,
@@ -168,7 +168,7 @@ func (s *UserService) BlockUser(ctx context.Context, id, blockedBy int64, ipAddr
 			return updateErr
 		}
 
-		return s.audit.LogActionWithContextTx(ctx, tx, blockedBy, "user.block", "user", fmt.Sprintf("%d", id), map[string]interface{}{
+		return s.audit.LogActionWithContextTx(ctx, tx, blockedBy, "user.block", "user", fmt.Sprintf("%d", id), map[string]any{
 			"target_user_id": id,
 		}, ipAddress, userAgent)
 	})
@@ -209,7 +209,7 @@ func (s *UserService) UnblockUser(ctx context.Context, id, unblockedBy int64, ip
 			return updateErr
 		}
 
-		return s.audit.LogActionWithContextTx(ctx, tx, unblockedBy, "user.unblock", "user", fmt.Sprintf("%d", id), map[string]interface{}{
+		return s.audit.LogActionWithContextTx(ctx, tx, unblockedBy, "user.unblock", "user", fmt.Sprintf("%d", id), map[string]any{
 			"target_user_id": id,
 		}, ipAddress, userAgent)
 	})

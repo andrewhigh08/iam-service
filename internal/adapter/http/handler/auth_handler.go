@@ -74,7 +74,7 @@ type UserInfo struct {
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.ValidationError(c, "invalid request body", map[string]interface{}{
+		response.ValidationError(c, "invalid request body", map[string]any{
 			"details": err.Error(),
 		})
 		return
@@ -142,7 +142,7 @@ type ChangePasswordRequest struct {
 func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	var req domain.ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.ValidationError(c, "invalid request body", map[string]interface{}{
+		response.ValidationError(c, "invalid request body", map[string]any{
 			"details": err.Error(),
 		})
 		return
@@ -151,7 +151,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	// Validate password complexity
 	validationResult := validator.ValidatePasswordDefault(req.NewPassword)
 	if !validationResult.Valid {
-		response.ValidationError(c, "password does not meet complexity requirements", map[string]interface{}{
+		response.ValidationError(c, "password does not meet complexity requirements", map[string]any{
 			"errors":   validationResult.Errors,
 			"strength": validationResult.Strength.String(),
 		})
@@ -196,7 +196,7 @@ type FirstTimePasswordChangeResponse struct {
 func (h *AuthHandler) FirstTimePasswordChange(c *gin.Context) {
 	var req domain.FirstTimePasswordChangeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.ValidationError(c, "invalid request body", map[string]interface{}{
+		response.ValidationError(c, "invalid request body", map[string]any{
 			"details": err.Error(),
 		})
 		return
@@ -205,7 +205,7 @@ func (h *AuthHandler) FirstTimePasswordChange(c *gin.Context) {
 	// Validate password complexity
 	validationResult := validator.ValidatePasswordDefault(req.NewPassword)
 	if !validationResult.Valid {
-		response.ValidationError(c, "password does not meet complexity requirements", map[string]interface{}{
+		response.ValidationError(c, "password does not meet complexity requirements", map[string]any{
 			"errors":   validationResult.Errors,
 			"strength": validationResult.Strength.String(),
 		})
@@ -265,7 +265,7 @@ type RefreshTokenResponse struct {
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	var req RefreshTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.ValidationError(c, "invalid request body", map[string]interface{}{
+		response.ValidationError(c, "invalid request body", map[string]any{
 			"details": err.Error(),
 		})
 		return
@@ -302,7 +302,7 @@ type LogoutRequest struct {
 func (h *AuthHandler) Logout(c *gin.Context) {
 	var req LogoutRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.ValidationError(c, "invalid request body", map[string]interface{}{
+		response.ValidationError(c, "invalid request body", map[string]any{
 			"details": err.Error(),
 		})
 		return

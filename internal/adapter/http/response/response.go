@@ -15,17 +15,17 @@ import (
 //
 // All API responses follow this format for consistency.
 type APIResponse struct {
-	Success bool        `json:"success"`         // Operation success flag
-	Data    interface{} `json:"data,omitempty"`  // Response payload
-	Error   *ErrorBody  `json:"error,omitempty"` // Error details (if any)
-	Meta    *Meta       `json:"meta,omitempty"`  // Pagination metadata
+	Success bool       `json:"success"`         // Operation success flag
+	Data    any        `json:"data,omitempty"`  // Response payload
+	Error   *ErrorBody `json:"error,omitempty"` // Error details (if any)
+	Meta    *Meta      `json:"meta,omitempty"`  // Pagination metadata
 }
 
 // ErrorBody represents the error details in an API response.
 type ErrorBody struct {
-	Code    string                 `json:"code"`              // Machine-readable error code
-	Message string                 `json:"message"`           // Human-readable error message
-	Details map[string]interface{} `json:"details,omitempty"` // Additional error details
+	Code    string         `json:"code"`              // Machine-readable error code
+	Message string         `json:"message"`           // Human-readable error message
+	Details map[string]any `json:"details,omitempty"` // Additional error details
 }
 
 // Meta represents pagination metadata in API responses.
@@ -37,7 +37,7 @@ type Meta struct {
 }
 
 // Success sends a successful response with data.
-func Success(c *gin.Context, data interface{}) {
+func Success(c *gin.Context, data any) {
 	c.JSON(http.StatusOK, APIResponse{
 		Success: true,
 		Data:    data,
@@ -45,7 +45,7 @@ func Success(c *gin.Context, data interface{}) {
 }
 
 // SuccessWithMeta sends a successful response with data and pagination metadata.
-func SuccessWithMeta(c *gin.Context, data interface{}, meta *Meta) {
+func SuccessWithMeta(c *gin.Context, data any, meta *Meta) {
 	c.JSON(http.StatusOK, APIResponse{
 		Success: true,
 		Data:    data,
@@ -54,7 +54,7 @@ func SuccessWithMeta(c *gin.Context, data interface{}, meta *Meta) {
 }
 
 // Created sends a successful response for resource creation (HTTP 201).
-func Created(c *gin.Context, data interface{}) {
+func Created(c *gin.Context, data any) {
 	c.JSON(http.StatusCreated, APIResponse{
 		Success: true,
 		Data:    data,
@@ -82,7 +82,7 @@ func Error(c *gin.Context, err error) {
 }
 
 // ErrorWithStatus sends an error response with a specific HTTP status.
-func ErrorWithStatus(c *gin.Context, status int, code, message string, details map[string]interface{}) {
+func ErrorWithStatus(c *gin.Context, status int, code, message string, details map[string]any) {
 	c.JSON(status, APIResponse{
 		Success: false,
 		Error: &ErrorBody{
@@ -115,12 +115,12 @@ func Forbidden(c *gin.Context, message string) {
 }
 
 // NotFound sends a 404 Not Found response.
-func NotFound(c *gin.Context, resource string, id interface{}) {
+func NotFound(c *gin.Context, resource string, id any) {
 	Error(c, apperror.NotFound(resource, id))
 }
 
 // Conflict sends a 409 Conflict response.
-func Conflict(c *gin.Context, resource, field string, value interface{}) {
+func Conflict(c *gin.Context, resource, field string, value any) {
 	Error(c, apperror.Conflict(resource, field, value))
 }
 
@@ -136,7 +136,7 @@ func TooManyRequests(c *gin.Context, message string, retryAfter int) {
 }
 
 // ValidationError sends a 400 response for validation errors.
-func ValidationError(c *gin.Context, message string, details map[string]interface{}) {
+func ValidationError(c *gin.Context, message string, details map[string]any) {
 	Error(c, apperror.ValidationError(message, details))
 }
 

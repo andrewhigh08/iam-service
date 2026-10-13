@@ -144,7 +144,7 @@ type CreateUserResponse struct {
 func (h *UserHandler) CreateUser(c *gin.Context) {
 	var req domain.CreateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.ValidationError(c, "invalid request body", map[string]interface{}{
+		response.ValidationError(c, "invalid request body", map[string]any{
 			"details": err.Error(),
 		})
 		return

@@ -149,7 +149,7 @@ func TestError_RegularError(t *testing.T) {
 func TestErrorWithStatus(t *testing.T) {
 	router := setupTestRouter()
 	router.GET("/test", func(c *gin.Context) {
-		ErrorWithStatus(c, http.StatusTeapot, "CUSTOM_ERROR", "I'm a teapot", map[string]interface{}{
+		ErrorWithStatus(c, http.StatusTeapot, "CUSTOM_ERROR", "I'm a teapot", map[string]any{
 			"hint": "try coffee",
 		})
 	})
@@ -345,7 +345,7 @@ func TestTooManyRequests(t *testing.T) {
 func TestValidationError(t *testing.T) {
 	router := setupTestRouter()
 	router.GET("/test", func(c *gin.Context) {
-		ValidationError(c, "validation failed", map[string]interface{}{
+		ValidationError(c, "validation failed", map[string]any{
 			"email":    "invalid format",
 			"password": "too short",
 		})

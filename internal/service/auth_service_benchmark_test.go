@@ -227,7 +227,7 @@ func BenchmarkRSAVerify(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		_, err := jwt.Parse(signed, func(token *jwt.Token) (interface{}, error) {
+		_, err := jwt.Parse(signed, func(token *jwt.Token) (any, error) {
 			return publicKey, nil
 		})
 		if err != nil {
@@ -266,7 +266,7 @@ func BenchmarkValidateToken_VariousRoleCounts(b *testing.B) {
 			b.ReportAllocs()
 
 			for i := 0; i < b.N; i++ {
-				_, err := jwt.ParseWithClaims(signed, &port.Claims{}, func(token *jwt.Token) (interface{}, error) {
+				_, err := jwt.ParseWithClaims(signed, &port.Claims{}, func(token *jwt.Token) (any, error) {
 					return publicKey, nil
 				})
 				if err != nil {

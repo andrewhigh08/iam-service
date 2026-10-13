@@ -272,7 +272,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (tokens
 	} else if locked {
 		log.LogAuthAttempt(email, false, "account locked due to too many failed attempts")
 		// Audit log: login attempt on locked account
-		s.logAuditEvent(ctx, 0, domain.AuditActionLoginLocked, email, map[string]interface{}{
+		s.logAuditEvent(ctx, 0, domain.AuditActionLoginLocked, email, map[string]any{
 			"reason": "too_many_failed_attempts",
 		})
 		return nil, false, apperror.Unauthorized("account is temporarily locked due to too many failed login attempts")
@@ -285,7 +285,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (tokens
 		s.recordFailedLoginAttempt(ctx, lockoutKey, email)
 		log.LogAuthAttempt(email, false, "user not found")
 		// Audit log: failed login (user not found)
-		s.logAuditEvent(ctx, 0, domain.AuditActionLoginFailed, email, map[string]interface{}{
+		s.logAuditEvent(ctx, 0, domain.AuditActionLoginFailed, email, map[string]any{
 			"reason": "user_not_found",
 		})
 		// Return generic error to prevent user enumeration
@@ -296,7 +296,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (tokens
 	if user.IsBlocked {
 		log.LogAuthAttempt(email, false, "user blocked")
 		// Audit log: failed login (user blocked)
-		s.logAuditEvent(ctx, user.ID, domain.AuditActionLoginFailed, email, map[string]interface{}{
+		s.logAuditEvent(ctx, user.ID, domain.AuditActionLoginFailed, email, map[string]any{
 			"reason": "user_blocked",
 		})
 		return nil, false, apperror.Unauthorized("user is blocked")
@@ -307,7 +307,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (tokens
 		s.recordFailedLoginAttempt(ctx, lockoutKey, email)
 		log.LogAuthAttempt(email, false, "invalid password")
 		// Audit log: failed login (invalid password)
-		s.logAuditEvent(ctx, user.ID, domain.AuditActionLoginFailed, email, map[string]interface{}{
+		s.logAuditEvent(ctx, user.ID, domain.AuditActionLoginFailed, email, map[string]any{
 			"reason": "invalid_password",
 		})
 		return nil, false, apperror.Unauthorized("invalid credentials")
@@ -322,7 +322,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (tokens
 	if user.PasswordType == domain.PasswordTypeOneTime {
 		log.LogAuthAttempt(email, true, "OTP login - password change required")
 		// Audit log: OTP login success (requires password change)
-		s.logAuditEvent(ctx, user.ID, domain.AuditActionLoginSuccess, email, map[string]interface{}{
+		s.logAuditEvent(ctx, user.ID, domain.AuditActionLoginSuccess, email, map[string]any{
 			"otp_login":                true,
 			"requires_password_change": true,
 		})
@@ -333,7 +333,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (tokens
 	if s.isPasswordExpired(user) {
 		log.LogAuthAttempt(email, true, "password expired - password change required")
 		// Audit log: password expired
-		s.logAuditEvent(ctx, user.ID, domain.AuditActionPasswordExpired, email, map[string]interface{}{
+		s.logAuditEvent(ctx, user.ID, domain.AuditActionPasswordExpired, email, map[string]any{
 			"password_changed_at":      user.PasswordChangedAt,
 			"requires_password_change": true,
 		})
@@ -355,7 +355,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (tokens
 	}
 
 	// Audit log: successful login
-	s.logAuditEvent(ctx, user.ID, domain.AuditActionLoginSuccess, email, map[string]interface{}{
+	s.logAuditEvent(ctx, user.ID, domain.AuditActionLoginSuccess, email, map[string]any{
 		"roles": roles,
 	})
 
@@ -407,7 +407,7 @@ func (s *AuthService) isPasswordExpired(user *domain.User) bool {
 }
 
 // logAuditEvent logs an authentication event to the audit log.
-func (s *AuthService) logAuditEvent(ctx context.Context, userID int64, action, resourceID string, details map[string]interface{}) {
+func (s *AuthService) logAuditEvent(ctx context.Context, userID int64, action, resourceID string, details map[string]any) {
 	if s.auditService == nil {
 		return
 	}
@@ -418,7 +418,7 @@ func (s *AuthService) logAuditEvent(ctx context.Context, userID int64, action, r
 
 // ValidateToken validates a JWT token and returns the claims.
 func (s *AuthService) ValidateToken(_ context.Context, tokenString string) (*port.Claims, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &port.Claims{}, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &port.Claims{}, func(token *jwt.Token) (any, error) {
 		// Verify signing method
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -474,7 +474,7 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID int64, oldPassw
 	}
 
 	// Audit log: password changed
-	s.logAuditEvent(ctx, userID, domain.AuditActionPasswordChange, user.Email, map[string]interface{}{
+	s.logAuditEvent(ctx, userID, domain.AuditActionPasswordChange, user.Email, map[string]any{
 		"email": user.Email,
 	})
 
@@ -528,7 +528,7 @@ func (s *AuthService) FirstTimePasswordChange(ctx context.Context, userID int64,
 	}
 
 	// Audit log: first-time password changed
-	s.logAuditEvent(ctx, userID, domain.AuditActionPasswordChangeFirstTime, user.Email, map[string]interface{}{
+	s.logAuditEvent(ctx, userID, domain.AuditActionPasswordChangeFirstTime, user.Email, map[string]any{
 		"email":               user.Email,
 		"previous_otp_status": true,
 	})
@@ -538,7 +538,7 @@ func (s *AuthService) FirstTimePasswordChange(ctx context.Context, userID int64,
 }
 
 // GetPublicKey returns the RSA public key for external token verification.
-func (s *AuthService) GetPublicKey() interface{} {
+func (s *AuthService) GetPublicKey() any {
 	return s.publicKey
 }
 
@@ -677,7 +677,7 @@ func (s *AuthService) Logout(ctx context.Context, refreshToken, accessToken stri
 	}
 
 	// Audit log: logout
-	s.logAuditEvent(ctx, userID, domain.AuditActionLogout, fmt.Sprintf("%d", userID), map[string]interface{}{
+	s.logAuditEvent(ctx, userID, domain.AuditActionLogout, fmt.Sprintf("%d", userID), map[string]any{
 		"access_token_blacklisted": accessToken != "",
 	})
 
@@ -734,7 +734,7 @@ func (s *AuthService) LogoutAll(ctx context.Context, userID int64, accessToken s
 	}
 
 	// Audit log: logout from all devices
-	s.logAuditEvent(ctx, userID, domain.AuditActionLogoutAll, fmt.Sprintf("%d", userID), map[string]interface{}{
+	s.logAuditEvent(ctx, userID, domain.AuditActionLogoutAll, fmt.Sprintf("%d", userID), map[string]any{
 		"access_token_blacklisted": accessToken != "",
 	})
 
@@ -826,7 +826,7 @@ func (s *AuthService) RevokeSession(ctx context.Context, userID int64, tokenID s
 	}
 
 	// Audit log: session revoked
-	s.logAuditEvent(ctx, userID, domain.AuditActionSessionRevoke, tokenID[:8], map[string]interface{}{
+	s.logAuditEvent(ctx, userID, domain.AuditActionSessionRevoke, tokenID[:8], map[string]any{
 		"token_id_prefix": tokenID[:8],
 	})
 

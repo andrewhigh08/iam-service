@@ -58,7 +58,7 @@ type AuthService interface {
 	GenerateTokenForUser(ctx context.Context, userID int64) (*TokenPair, error)
 
 	// GetPublicKey returns the RSA public key for external token verification.
-	GetPublicKey() interface{}
+	GetPublicKey() any
 
 	// GetUserSessions retrieves all active sessions (refresh tokens) for a user.
 	// currentTokenID is used to mark the current session; can be empty.
@@ -131,16 +131,16 @@ type AuthorizationService interface {
 // compliance, and debugging purposes.
 type AuditService interface {
 	// LogAction logs an action to the audit trail.
-	LogAction(ctx context.Context, userID int64, action, resourceType, resourceID string, details map[string]interface{}) error
+	LogAction(ctx context.Context, userID int64, action, resourceType, resourceID string, details map[string]any) error
 
 	// LogActionTx logs an action within an existing transaction.
-	LogActionTx(ctx context.Context, tx *gorm.DB, userID int64, action, resourceType, resourceID string, details map[string]interface{}) error
+	LogActionTx(ctx context.Context, tx *gorm.DB, userID int64, action, resourceType, resourceID string, details map[string]any) error
 
 	// LogActionWithContext logs an action with IP address and user agent.
-	LogActionWithContext(ctx context.Context, userID int64, action, resourceType, resourceID string, details map[string]interface{}, ipAddress, userAgent string) error
+	LogActionWithContext(ctx context.Context, userID int64, action, resourceType, resourceID string, details map[string]any, ipAddress, userAgent string) error
 
 	// LogActionWithContextTx logs an action with context within a transaction.
-	LogActionWithContextTx(ctx context.Context, tx *gorm.DB, userID int64, action, resourceType, resourceID string, details map[string]interface{}, ipAddress, userAgent string) error
+	LogActionWithContextTx(ctx context.Context, tx *gorm.DB, userID int64, action, resourceType, resourceID string, details map[string]any, ipAddress, userAgent string) error
 
 	// GetUserAuditLogs retrieves recent audit log entries for a user.
 	GetUserAuditLogs(ctx context.Context, userID int64, limit int) ([]domain.AuditLog, error)

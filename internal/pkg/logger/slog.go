@@ -161,7 +161,7 @@ func (l *Logger) WithError(err error) *Logger {
 }
 
 // WithFields returns a logger with additional custom fields.
-func (l *Logger) WithFields(fields map[string]interface{}) *Logger {
+func (l *Logger) WithFields(fields map[string]any) *Logger {
 	attrs := make([]any, 0, len(fields)*2)
 	for k, v := range fields {
 		attrs = append(attrs, slog.Any(k, v))
