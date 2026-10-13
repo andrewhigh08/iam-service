@@ -9,8 +9,8 @@ import (
 
 	"github.com/casbin/casbin/v3"
 
-	redisstore "github.com/andrewhigh08/iam-service/internal/adapter/cache/redis"
-	postgresrepo "github.com/andrewhigh08/iam-service/internal/adapter/repository/postgres"
+	"github.com/andrewhigh08/iam-service/internal/adapter/pgrepo"
+	"github.com/andrewhigh08/iam-service/internal/adapter/redisstore"
 	"github.com/andrewhigh08/iam-service/internal/port"
 	"github.com/andrewhigh08/iam-service/internal/service"
 )
@@ -24,7 +24,7 @@ type services struct {
 	users    port.UserService
 	authz    port.AuthorizationService
 	audit    port.AuditService
-	tx       *postgresrepo.TxManager
+	tx       *pgrepo.TxManager
 	enforcer casbin.IEnforcer
 	seeder   *service.Seeder
 }
@@ -36,9 +36,9 @@ func (a *App) newServices(enforcer casbin.IEnforcer) (*services, error) {
 		return nil, err
 	}
 
-	userRepo := postgresrepo.NewUserRepository(a.db)
-	auditRepo := postgresrepo.NewAuditLogRepository(a.db)
-	txManager := postgresrepo.NewTxManager(a.db)
+	userRepo := pgrepo.NewUserRepository(a.db)
+	auditRepo := pgrepo.NewAuditLogRepository(a.db)
+	txManager := pgrepo.NewTxManager(a.db)
 	sessions := redisstore.NewSessionStore(a.rdb)
 	revocations := redisstore.NewRevocationStore(a.rdb)
 	attempts := redisstore.NewLoginAttemptStore(a.rdb)

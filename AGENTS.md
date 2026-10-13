@@ -17,7 +17,7 @@ internal/app/       dependency wiring, router, graceful shutdown
 internal/domain/    entities and domain constants, no external deps and no HTTP tags
 internal/port/      interfaces between layers (services, repositories, stores, transactions)
 internal/service/   business logic; depends only on domain, port and internal/pkg
-internal/adapter/   infrastructure: http (gin handlers, middleware, DTOs), repository/postgres, cache/redis
+internal/adapter/   infrastructure: http (gin handlers, middleware, DTOs), pgrepo (PostgreSQL), redisstore (Redis)
 internal/config/    env configuration (cleanenv) and its validation
 internal/pkg/       small shared packages (apperror, logger, metrics, telemetry, validator)
 migrations/         SQL migrations, embedded and applied at startup

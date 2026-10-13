@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	postgresrepo "github.com/andrewhigh08/iam-service/internal/adapter/repository/postgres"
+	"github.com/andrewhigh08/iam-service/internal/adapter/pgrepo"
 	"github.com/andrewhigh08/iam-service/migrations"
 )
 
@@ -28,10 +28,10 @@ func TestMigrationsRollBackAndReapplyCleanly(t *testing.T) {
 	require.NoError(t, err)
 	db := openDB(t, s, migrationsDB)
 
-	require.NoError(t, postgresrepo.Migrate(t.Context(), db, migrations.FS))
+	require.NoError(t, pgrepo.Migrate(t.Context(), db, migrations.FS))
 	assertSchema(t, db, true)
 	// An up-to-date schema is left alone.
-	require.NoError(t, postgresrepo.Migrate(t.Context(), db, migrations.FS))
+	require.NoError(t, pgrepo.Migrate(t.Context(), db, migrations.FS))
 	assertSchema(t, db, true)
 
 	m := newMigrator(t, db)
@@ -40,7 +40,7 @@ func TestMigrationsRollBackAndReapplyCleanly(t *testing.T) {
 	_, _, err = m.Version()
 	require.ErrorIs(t, err, migrate.ErrNilVersion)
 
-	require.NoError(t, postgresrepo.Migrate(t.Context(), db, migrations.FS))
+	require.NoError(t, pgrepo.Migrate(t.Context(), db, migrations.FS))
 	assertSchema(t, db, true)
 	version, dirty, err := m.Version()
 	require.NoError(t, err)

@@ -1,4 +1,4 @@
-package redis
+package redisstore
 
 import "github.com/andrewhigh08/iam-service/internal/port"
 

@@ -13,7 +13,7 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 	"gorm.io/plugin/opentelemetry/tracing"
 
-	postgresrepo "github.com/andrewhigh08/iam-service/internal/adapter/repository/postgres"
+	"github.com/andrewhigh08/iam-service/internal/adapter/pgrepo"
 	"github.com/andrewhigh08/iam-service/migrations"
 )
 
@@ -67,7 +67,7 @@ func (a *App) openDatabase(ctx context.Context) error {
 	if !a.cfg.Database.Migrate {
 		return nil
 	}
-	if err = postgresrepo.Migrate(ctx, sqlDB, migrations.FS); err != nil {
+	if err = pgrepo.Migrate(ctx, sqlDB, migrations.FS); err != nil {
 		return fmt.Errorf("apply migrations: %w", err)
 	}
 	a.log.Info("database migrations applied")
