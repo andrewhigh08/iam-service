@@ -2,131 +2,110 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
+    tags: ["v*"]
   pull_request:
-    branches: [main, develop]
 
-# Required permissions for security scanning
 permissions:
   contents: read
-  security-events: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  GO_VERSION: '1.24'
+  GOLANGCI_LINT_VERSION: v2.14.0
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
+          go-version-file: go.mod
 
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v4
+      - name: Check go.mod is tidy
+        run: go mod tidy -diff
+
+      - name: Check generated code is up to date
+        run: |
+          go generate ./...
+          git diff --exit-code -- test/mocks docs || (echo "::error::generated files are stale, run 'make generate'" && exit 1)
+
+      - uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
-          args: --timeout=5m
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
 
   test:
-    name: Test
+    name: Unit tests
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_DB: iam_test_db
-          POSTGRES_USER: iam_user
-          POSTGRES_PASSWORD: iam_password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
+          go-version-file: go.mod
 
       - name: Run unit tests
-        run: make test-unit
-        env:
-          DB_HOST: localhost
-          DB_PORT: 5432
-          DB_USER: iam_user
-          DB_PASSWORD: iam_password
-          DB_NAME: iam_test_db
-          REDIS_HOST: localhost
-          REDIS_PORT: 6379
+        run: make test
 
-      - name: Run integration tests
-        run: make test-integration
-        env:
-          DB_HOST: localhost
-          DB_PORT: 5432
-          DB_USER: iam_user
-          DB_PASSWORD: iam_password
-          DB_NAME: iam_test_db
-          REDIS_HOST: localhost
-          REDIS_PORT: 6379
+      - name: Coverage summary
+        run: |
+          {
+            echo '### Unit test coverage'
+            echo '```'
+            go tool cover -func=coverage.out | tail -n 1
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload coverage report
-        uses: codecov/codecov-action@v4
+      - uses: actions/upload-artifact@v7
         with:
-          files: ./coverage.out
-          fail_ci_if_error: false
-          verbose: true
+          name: coverage
+          path: coverage.out
+          retention-days: 7
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Run integration tests (testcontainers)
+        run: make test-integration
 
   security:
     name: Security
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
+          go-version-file: go.mod
 
-      - name: Run gosec
-        uses: securego/gosec@v2.21.4
+      - name: gosec
+        uses: securego/gosec@v2.29.0
         with:
-          args: '-no-fail -fmt sarif -out results.sarif ./...'
+          args: -no-fail -fmt sarif -out gosec.sarif ./...
 
-      - name: Upload SARIF file
+      - name: Upload gosec results
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: results.sarif
-        if: always()
+          sarif_file: gosec.sarif
+          category: gosec
         continue-on-error: true
 
-      - name: Run govulncheck
+      - name: govulncheck
+        # Advisory: a CVE published upstream must not block unrelated changes.
+        # The step log and the Security tab show what needs a dependency bump.
+        continue-on-error: true
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
@@ -134,84 +113,83 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [lint, test, integration]
+    permissions:
+      contents: read
+      security-events: write
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
+          go-version-file: go.mod
 
       - name: Build binary
         run: make build
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      - name: Build Docker image
-        uses: docker/build-push-action@v5
+      - name: Build image
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: false
           load: true
-          tags: iam-service:${{ github.sha }}
+          tags: iam-service:ci
+          build-args: |
+            VERSION=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.28.0
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@0.36.0
         with:
-          image-ref: 'iam-service:${{ github.sha }}'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
+          image-ref: iam-service:ci
+          format: sarif
+          output: trivy.sarif
+          severity: CRITICAL,HIGH
 
-      - name: Upload Trivy scan results
+      - name: Upload Trivy results
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: 'trivy-results.sarif'
-        if: always()
+          sarif_file: trivy.sarif
+          category: trivy
         continue-on-error: true
 
-  docker-push:
-    name: Push Docker Image
+  publish:
+    name: Publish image
     runs-on: ubuntu-latest
     needs: [build, security]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.ENABLE_DOCKER_PUSH == 'true'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    permissions:
+      contents: read
+      packages: write
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      - name: Login to Container Registry
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
-          registry: ${{ secrets.REGISTRY_URL }}
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
+      - id: meta
+        uses: docker/metadata-action@v6
         with:
-          images: ${{ secrets.REGISTRY_URL }}/iam-service
+          images: ${{ env.IMAGE_NAME }}
           tags: |
             type=sha
-            type=ref,event=branch
             type=semver,pattern={{version}}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push
-        uses: docker/build-push-action@v5
+      - uses: docker/build-push-action@v7
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
