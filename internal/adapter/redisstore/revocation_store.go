@@ -23,6 +23,8 @@ redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
 return 1
 `)
 
+const msgCheckRevocationFailed = "failed to check token revocation"
+
 // RevocationStore implements port.RevocationStore on Redis string keys with TTLs.
 type RevocationStore struct {
 	client redis.Cmdable
@@ -49,7 +51,7 @@ func (s *RevocationStore) RevokeToken(ctx context.Context, jti string, ttl time.
 func (s *RevocationStore) IsTokenRevoked(ctx context.Context, jti string) (bool, error) {
 	n, err := s.client.Exists(ctx, revokedJTIKey(jti)).Result()
 	if err != nil {
-		return false, apperror.Internal("failed to check token revocation", err)
+		return false, apperror.Internal(msgCheckRevocationFailed, err)
 	}
 	return n > 0, nil
 }
@@ -71,12 +73,45 @@ func (s *RevocationStore) RevokeUserTokensBefore(ctx context.Context, userID int
 
 // UserTokensRevokedBefore returns the recorded instant, or the zero time when none is recorded.
 func (s *RevocationStore) UserTokensRevokedBefore(ctx context.Context, userID int64) (time.Time, error) {
-	sec, err := s.client.Get(ctx, userRevokedBeforeKey(userID)).Int64()
+	revokedBefore, err := instantOf(s.client.Get(ctx, userRevokedBeforeKey(userID)))
+	if err != nil {
+		return time.Time{}, apperror.Internal("failed to load user revocation instant", err)
+	}
+	return revokedBefore, nil
+}
+
+// Check reports whether jti is blacklisted and returns the user's revocation instant, or the
+// zero time when none is recorded, reading both keys in one pipeline.
+func (s *RevocationStore) Check(ctx context.Context, jti string, userID int64) (bool, time.Time, error) {
+	var (
+		exists *redis.IntCmd
+		before *redis.StringCmd
+	)
+	// A failing command fails the pipeline; a missing instant is reported as redis.Nil.
+	_, err := s.client.Pipelined(ctx, func(p redis.Pipeliner) error {
+		exists = p.Exists(ctx, revokedJTIKey(jti))
+		before = p.Get(ctx, userRevokedBeforeKey(userID))
+		return nil
+	})
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return false, time.Time{}, apperror.Internal(msgCheckRevocationFailed, err)
+	}
+	revokedBefore, err := instantOf(before)
+	if err != nil {
+		return false, time.Time{}, apperror.Internal(msgCheckRevocationFailed, err)
+	}
+	return exists.Val() > 0, revokedBefore, nil
+}
+
+// instantOf decodes the unix seconds a GET on a revocation-instant key returned; redis.Nil
+// means no instant is recorded and yields the zero time.
+func instantOf(cmd *redis.StringCmd) (time.Time, error) {
+	sec, err := cmd.Int64()
 	if errors.Is(err, redis.Nil) {
 		return time.Time{}, nil
 	}
 	if err != nil {
-		return time.Time{}, apperror.Internal("failed to load user revocation instant", err)
+		return time.Time{}, err
 	}
 	return time.Unix(sec, 0).UTC(), nil
 }

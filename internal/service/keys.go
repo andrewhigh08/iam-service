@@ -102,7 +102,6 @@ func loadPublicKey(path string) (*rsa.PublicKey, error) {
 	return key, nil
 }
 
-// readPEM returns the DER bytes of the first PEM block in the file at path.
 func readPEM(path string) ([]byte, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // G304: key paths come from the configuration
 	if err != nil {
@@ -115,7 +114,6 @@ func readPEM(path string) ([]byte, error) {
 	return block.Bytes, nil
 }
 
-// writePEM creates path with mode, creating parent directories, and writes der as a PEM block.
 func writePEM(path, blockType string, der []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("create key directory: %w", err)

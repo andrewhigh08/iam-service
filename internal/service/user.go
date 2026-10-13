@@ -6,8 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
-
 	"github.com/andrewhigh08/iam-service/internal/domain"
 	"github.com/andrewhigh08/iam-service/internal/pkg/apperror"
 	"github.com/andrewhigh08/iam-service/internal/pkg/logger"
@@ -57,7 +55,6 @@ func NewUserService(deps UserDeps) (*UserService, error) {
 	}, nil
 }
 
-// validateUserDeps rejects missing collaborators and a non-positive access TTL.
 func validateUserDeps(deps UserDeps) error {
 	var missing string
 	switch {
@@ -101,14 +98,14 @@ func (s *UserService) Create(ctx context.Context, in port.CreateUserInput, actor
 	if exists {
 		return nil, apperror.Conflict("user", "email", email)
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcrypt.DefaultCost)
+	hash, err := hashPassword(in.Password)
 	if err != nil {
-		return nil, apperror.Internal(msgHashingFailed, err)
+		return nil, err
 	}
 	now := s.now()
 	user := &domain.User{
 		Email:             email,
-		PasswordHash:      string(hash),
+		PasswordHash:      hash,
 		PasswordTemporary: in.Temporary,
 		PasswordChangedAt: now,
 		FullName:          strings.TrimSpace(in.FullName),
@@ -149,7 +146,6 @@ func (s *UserService) recordAudit(ctx context.Context, actor domain.Actor, actio
 	}
 }
 
-// auditEvent builds the audit event of an administrative action on the user userID.
 func auditEvent(actor domain.Actor, action string, userID int64, details map[string]any) domain.AuditEvent {
 	return domain.AuditEvent{
 		ActorID:      actor.UserID,

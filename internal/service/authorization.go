@@ -95,12 +95,10 @@ func (s *AuthorizationService) EnsurePolicies(ctx context.Context, policies []do
 	return nil
 }
 
-// subject returns the casbin subject of a user.
 func subject(userID int64) string {
 	return subjectPrefix + formatID(userID)
 }
 
-// roleName returns the casbin subject of a role.
 func roleName(role string) string {
 	return rolePrefix + role
 }

@@ -23,8 +23,8 @@ func TestAuthService_Logout_EndsSessionAndRevokesAccessTokens(t *testing.T) {
 	gomock.InOrder(
 		f.sessions.EXPECT().Get(gomock.Any(), hash).Return(session, nil),
 		f.sessions.EXPECT().Delete(gomock.Any(), hash).Return(nil),
-		f.revocations.EXPECT().RevokeToken(gomock.Any(), session.AccessJTI, 10*time.Minute).Return(nil),
-		f.revocations.EXPECT().RevokeToken(gomock.Any(), claims.ID, testAccessTTL).Return(nil),
+		f.revocations.EXPECT().RevokeToken(gomock.Any(), session.AccessJTI, 10*time.Minute+clockSkewLeeway).Return(nil),
+		f.revocations.EXPECT().RevokeToken(gomock.Any(), claims.ID, testAccessTTL+clockSkewLeeway).Return(nil),
 	)
 	event := expectAudit(f.audit, domain.AuditActionLogout)
 
@@ -65,11 +65,23 @@ func TestAuthService_Logout_Variants(t *testing.T) {
 
 		require.NoError(t, f.svc.Logout(t.Context(), refresh, "", f.meta))
 	})
-	t.Run("session whose access token already expired", func(t *testing.T) {
+	t.Run("session whose access token expired within the leeway is blacklisted for the rest of it", func(t *testing.T) {
 		t.Parallel()
 		f := newAuthFixture(t)
 		refresh, hash, session := refreshFixture(f.user(), f.now, 'o')
-		session.AccessExpiresAt = f.now
+		session.AccessExpiresAt = f.now.Add(-10 * time.Second)
+		f.sessions.EXPECT().Get(gomock.Any(), hash).Return(session, nil)
+		f.sessions.EXPECT().Delete(gomock.Any(), hash).Return(nil)
+		f.revocations.EXPECT().RevokeToken(gomock.Any(), session.AccessJTI, clockSkewLeeway-10*time.Second).Return(nil)
+		expectAudit(f.audit, domain.AuditActionLogout)
+
+		require.NoError(t, f.svc.Logout(t.Context(), refresh, "", f.meta))
+	})
+	t.Run("session whose access token is past the leeway", func(t *testing.T) {
+		t.Parallel()
+		f := newAuthFixture(t)
+		refresh, hash, session := refreshFixture(f.user(), f.now, 'q')
+		session.AccessExpiresAt = f.now.Add(-clockSkewLeeway)
 		f.sessions.EXPECT().Get(gomock.Any(), hash).Return(session, nil)
 		f.sessions.EXPECT().Delete(gomock.Any(), hash).Return(nil)
 		expectAudit(f.audit, domain.AuditActionLogout)
@@ -82,7 +94,7 @@ func TestAuthService_Logout_Variants(t *testing.T) {
 		user := f.user()
 		access := f.issuedToken(user, testSID)
 		claims := f.parseClaims(access)
-		f.revocations.EXPECT().RevokeToken(gomock.Any(), claims.ID, testAccessTTL).Return(nil)
+		f.revocations.EXPECT().RevokeToken(gomock.Any(), claims.ID, testAccessTTL+clockSkewLeeway).Return(nil)
 		event := expectAudit(f.audit, domain.AuditActionLogout)
 
 		require.NoError(t, f.svc.Logout(t.Context(), "", access, f.meta))
@@ -120,12 +132,28 @@ func TestAuthService_Logout_Variants(t *testing.T) {
 
 		assert.Equal(t, map[string]any{"sid": session.ID}, event.Details)
 	})
-	t.Run("access token at the end of its life is not blacklisted", func(t *testing.T) {
+	t.Run("access token that expired within the leeway is blacklisted for the rest of it", func(t *testing.T) {
+		t.Parallel()
+		f := newAuthFixture(t)
+		user := f.user()
+		// exp is 10s in the past: the parser accepts the token for another 20s, so the
+		// blacklist entry has to live that long.
+		access, jti, err := f.svc.signAccessToken(user, nil, testSID, f.now.Add(-testAccessTTL-10*time.Second))
+		require.NoError(t, err)
+		f.revocations.EXPECT().RevokeToken(gomock.Any(), jti, clockSkewLeeway-10*time.Second).Return(nil)
+		event := expectAudit(f.audit, domain.AuditActionLogout)
+
+		require.NoError(t, f.svc.Logout(t.Context(), "", access, f.meta))
+
+		assert.Equal(t, user.ID, event.ActorID)
+		assert.Equal(t, map[string]any{"access_token_revoked": true}, event.Details)
+	})
+	t.Run("access token past the leeway is not blacklisted", func(t *testing.T) {
 		t.Parallel()
 		f := newAuthFixture(t)
 		user := f.user()
 		access := f.issuedToken(user, testSID)
-		f.now = f.now.Add(testAccessTTL)
+		f.now = f.now.Add(testAccessTTL + clockSkewLeeway)
 		event := expectAudit(f.audit, domain.AuditActionLogout)
 
 		require.NoError(t, f.svc.Logout(t.Context(), "", access, f.meta))
@@ -137,7 +165,7 @@ func TestAuthService_Logout_Variants(t *testing.T) {
 		t.Parallel()
 		f := newAuthFixture(t)
 		access := f.issuedToken(f.user(), testSID)
-		f.revocations.EXPECT().RevokeToken(gomock.Any(), gomock.Any(), testAccessTTL).Return(boom)
+		f.revocations.EXPECT().RevokeToken(gomock.Any(), gomock.Any(), testAccessTTL+clockSkewLeeway).Return(boom)
 
 		err := f.svc.Logout(t.Context(), "", access, f.meta)
 
@@ -187,8 +215,8 @@ func TestAuthService_LogoutAll_RevokesSessionsAndTokens(t *testing.T) {
 	t.Parallel()
 	f := newAuthFixture(t)
 	gomock.InOrder(
-		f.sessions.EXPECT().DeleteAllForUser(gomock.Any(), testUserID).Return(2, nil),
 		f.revocations.EXPECT().RevokeUserTokensBefore(gomock.Any(), testUserID, f.now, testAccessTTL+revocationGrace).Return(nil),
+		f.sessions.EXPECT().DeleteAllForUser(gomock.Any(), testUserID).Return(2, nil),
 	)
 	event := expectAudit(f.audit, domain.AuditActionLogoutAll)
 
@@ -203,35 +231,37 @@ func TestAuthService_LogoutAll_RevokesSessionsAndTokens(t *testing.T) {
 func TestAuthService_LogoutAll_StoreFailures(t *testing.T) {
 	t.Parallel()
 	boom := errors.New("redis down")
-	t.Run("session wipe failure stops before the revocation", func(t *testing.T) {
+	t.Run("revocation failure stops before the session wipe", func(t *testing.T) {
 		t.Parallel()
 		f := newAuthFixture(t)
-		f.sessions.EXPECT().DeleteAllForUser(gomock.Any(), testUserID).Return(0, boom)
-
-		err := f.svc.LogoutAll(t.Context(), testUserID, f.meta)
-
-		appErr := requireAppError(t, err, apperror.CodeInternal)
-		assert.Equal(t, "failed to delete sessions", appErr.Message)
-		require.ErrorIs(t, err, boom)
-	})
-	t.Run("revocation failure", func(t *testing.T) {
-		t.Parallel()
-		f := newAuthFixture(t)
-		f.sessions.EXPECT().DeleteAllForUser(gomock.Any(), testUserID).Return(1, nil)
 		f.revocations.EXPECT().RevokeUserTokensBefore(gomock.Any(), testUserID, f.now, testAccessTTL+revocationGrace).Return(boom)
 
 		err := f.svc.LogoutAll(t.Context(), testUserID, f.meta)
 
 		appErr := requireAppError(t, err, apperror.CodeInternal)
 		assert.Equal(t, "failed to revoke access tokens", appErr.Message)
+		require.ErrorIs(t, err, boom)
+	})
+	t.Run("session wipe failure after the instant was recorded", func(t *testing.T) {
+		t.Parallel()
+		f := newAuthFixture(t)
+		f.revocations.EXPECT().RevokeUserTokensBefore(gomock.Any(), testUserID, f.now, testAccessTTL+revocationGrace).Return(nil)
+		f.sessions.EXPECT().DeleteAllForUser(gomock.Any(), testUserID).Return(0, boom)
+
+		err := f.svc.LogoutAll(t.Context(), testUserID, f.meta)
+
+		appErr := requireAppError(t, err, apperror.CodeInternal)
+		assert.Equal(t, "failed to delete sessions", appErr.Message)
 	})
 }
 
 func TestAuthService_ListSessions(t *testing.T) {
 	t.Parallel()
-	t.Run("marks the current session and sorts newest first", func(t *testing.T) {
+	t.Run("marks the current session and keeps the store's order", func(t *testing.T) {
 		t.Parallel()
 		f := newAuthFixture(t)
+		// The store owns the ordering, so an order the service would change if it sorted
+		// must come back untouched.
 		f.sessions.EXPECT().ListForUser(gomock.Any(), testUserID).Return([]domain.Session{
 			{ID: "older", CreatedAt: f.now.Add(-3 * time.Hour)},
 			{ID: "newest", CreatedAt: f.now.Add(-time.Minute)},
@@ -248,8 +278,8 @@ func TestAuthService_ListSessions(t *testing.T) {
 			ids = append(ids, s.ID)
 			current = append(current, s.Current)
 		}
-		assert.Equal(t, []string{"newest", "middle", "older"}, ids)
-		assert.Equal(t, []bool{false, true, false}, current)
+		assert.Equal(t, []string{"older", "newest", "middle"}, ids)
+		assert.Equal(t, []bool{false, false, true}, current)
 	})
 	t.Run("marks nothing without a current sid", func(t *testing.T) {
 		t.Parallel()
@@ -301,7 +331,7 @@ func TestAuthService_RevokeSession(t *testing.T) {
 		gomock.InOrder(
 			f.sessions.EXPECT().ListForUser(gomock.Any(), testUserID).Return([]domain.Session{withToken}, nil),
 			f.sessions.EXPECT().Delete(gomock.Any(), own.TokenHash).Return(nil),
-			f.revocations.EXPECT().RevokeToken(gomock.Any(), "jti-of-own-session", 7*time.Minute).Return(nil),
+			f.revocations.EXPECT().RevokeToken(gomock.Any(), "jti-of-own-session", 7*time.Minute+clockSkewLeeway).Return(nil),
 		)
 		expectAudit(f.audit, domain.AuditActionSessionRevoke)
 
@@ -315,7 +345,7 @@ func TestAuthService_RevokeSession(t *testing.T) {
 		withToken.AccessExpiresAt = f.now.Add(7 * time.Minute)
 		f.sessions.EXPECT().ListForUser(gomock.Any(), testUserID).Return([]domain.Session{withToken}, nil)
 		f.sessions.EXPECT().Delete(gomock.Any(), own.TokenHash).Return(nil)
-		f.revocations.EXPECT().RevokeToken(gomock.Any(), "jti-of-own-session", 7*time.Minute).Return(boom)
+		f.revocations.EXPECT().RevokeToken(gomock.Any(), "jti-of-own-session", 7*time.Minute+clockSkewLeeway).Return(boom)
 
 		err := f.svc.RevokeSession(t.Context(), testUserID, own.ID, f.meta)
 

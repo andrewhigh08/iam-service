@@ -67,7 +67,6 @@ func (h *AuthHandler) RevokeSession(c *gin.Context) {
 	response.Success(c, MessageResponse{Message: "session revoked"})
 }
 
-// newSessionResponse maps a session to its DTO with timestamps in UTC.
 func newSessionResponse(s *domain.Session) SessionResponse {
 	return SessionResponse{
 		ID:        s.ID,

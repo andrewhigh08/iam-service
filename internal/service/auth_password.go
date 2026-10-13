@@ -62,15 +62,15 @@ func (s *AuthService) replacePassword(ctx context.Context, user *domain.User, ne
 			"errors": []string{"new password must differ from the current one"},
 		})
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	hash, err := hashPassword(newPassword)
 	if err != nil {
-		return nil, apperror.Internal(msgHashingFailed, err)
+		return nil, err
 	}
 	now := s.now()
-	if err = s.deps.Users.UpdatePassword(ctx, user.ID, string(hash), false, now); err != nil {
+	if err = s.deps.Users.UpdatePassword(ctx, user.ID, hash, false, now); err != nil {
 		return nil, asInternal("failed to update password", err)
 	}
-	user.PasswordHash = string(hash)
+	user.PasswordHash = hash
 	user.PasswordTemporary = false
 	user.PasswordChangedAt = now
 	removed, err := s.revoker.revokeAll(ctx, user.ID, now)

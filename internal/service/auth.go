@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rsa"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -24,7 +25,16 @@ const (
 	// clockSkewLeeway is the clock difference tolerated between the replica that issued a token
 	// and the one validating it, so a token minted a moment ago is not rejected as "not yet valid".
 	clockSkewLeeway = 30 * time.Second
+	// dummyPassword is the password whose hash unknown accounts are compared against, so that
+	// they cost the same bcrypt work as known ones.
+	dummyPassword = "iam-service dummy password"
 )
+
+// dummyPasswordHash hashes dummyPassword once per process at the cost of real passwords.
+// NewAuthService forces it, so the request path only reads the stored result.
+var dummyPasswordHash = sync.OnceValues(func() (string, error) {
+	return hashPassword(dummyPassword)
+})
 
 // AuthDeps lists the collaborators of AuthService. Logger may be nil.
 type AuthDeps struct {
@@ -56,17 +66,19 @@ type AuthConfig struct {
 
 // AuthService implements port.AuthService with RS256 access tokens and refresh-token sessions.
 type AuthService struct {
-	deps    AuthDeps
-	cfg     AuthConfig
-	revoker accessRevoker
-	parser  *jwt.Parser
-	kid     string
-	jwks    []byte
-	logger  *logger.Logger
-	now     func() time.Time
+	deps      AuthDeps
+	cfg       AuthConfig
+	revoker   accessRevoker
+	parser    *jwt.Parser
+	kid       string
+	jwks      []byte
+	dummyHash []byte
+	logger    *logger.Logger
+	now       func() time.Time
 }
 
-// NewAuthService validates deps and cfg and prepares the token parser and the JWKS document.
+// NewAuthService validates deps and cfg and prepares the token parser, the JWKS document and
+// the hash that unknown accounts are compared against.
 func NewAuthService(deps AuthDeps, cfg AuthConfig) (*AuthService, error) {
 	if err := validateAuthDeps(deps); err != nil {
 		return nil, err
@@ -77,6 +89,10 @@ func NewAuthService(deps AuthDeps, cfg AuthConfig) (*AuthService, error) {
 	kid, jwks, err := buildJWKS(cfg.PublicKey)
 	if err != nil {
 		return nil, err
+	}
+	dummyHash, err := dummyPasswordHash()
+	if err != nil {
+		return nil, fmt.Errorf("auth service: hash dummy password: %w", err)
 	}
 	return &AuthService{
 		deps: deps,
@@ -93,14 +109,14 @@ func NewAuthService(deps AuthDeps, cfg AuthConfig) (*AuthService, error) {
 			jwt.WithIssuedAt(),
 			jwt.WithLeeway(clockSkewLeeway),
 		),
-		kid:    kid,
-		jwks:   jwks,
-		logger: componentLogger(deps.Logger, "auth"),
-		now:    time.Now,
+		kid:       kid,
+		jwks:      jwks,
+		dummyHash: []byte(dummyHash),
+		logger:    componentLogger(deps.Logger, "auth"),
+		now:       time.Now,
 	}, nil
 }
 
-// validateAuthDeps rejects missing collaborators.
 func validateAuthDeps(deps AuthDeps) error {
 	var missing string
 	switch {
@@ -122,7 +138,6 @@ func validateAuthDeps(deps AuthDeps) error {
 	return errors.New("auth service: " + missing + " is required")
 }
 
-// validateAuthConfig checks the keys and limits of cfg and fills in the defaults.
 func validateAuthConfig(cfg *AuthConfig) error {
 	switch {
 	case cfg.PrivateKey == nil || cfg.PublicKey == nil:
@@ -174,8 +189,6 @@ func (s *AuthService) Login(ctx context.Context, email, password string, meta do
 	return &port.LoginResult{Tokens: issued.tokens, User: user, Roles: issued.roles}, nil
 }
 
-// passwordChangeReason returns why the user must change the password before receiving
-// tokens, or "" when no change is required.
 func (s *AuthService) passwordChangeReason(user *domain.User) string {
 	switch {
 	case user.PasswordTemporary:
@@ -188,8 +201,8 @@ func (s *AuthService) passwordChangeReason(user *domain.User) string {
 }
 
 // authenticate verifies the password of the account identified by the normalized email while
-// enforcing the lockout policy. Rejections are counted and audited, and their messages do not
-// reveal whether the account exists.
+// enforcing the lockout policy. Rejections are counted and audited, and their messages reveal
+// neither whether the account exists nor whether it is blocked.
 func (s *AuthService) authenticate(ctx context.Context, email, password string, meta domain.ClientMeta) (*domain.User, error) {
 	if err := s.checkLock(ctx, email, 0, meta); err != nil {
 		return nil, err
@@ -197,7 +210,7 @@ func (s *AuthService) authenticate(ctx context.Context, email, password string, 
 	user, err := s.deps.Users.FindByEmail(ctx, email)
 	if isNotFound(err) {
 		// Spend the same bcrypt work as for a known account before rejecting.
-		_ = bcrypt.CompareHashAndPassword(dummyPasswordHash(), []byte(password))
+		_ = bcrypt.CompareHashAndPassword(s.dummyHash, []byte(password))
 		if rejectErr := s.rejectCredentials(ctx, email, 0, "user_not_found", meta); rejectErr != nil {
 			return nil, rejectErr
 		}
@@ -213,9 +226,10 @@ func (s *AuthService) authenticate(ctx context.Context, email, password string, 
 		return nil, apperror.Unauthorized(msgLoginRejected)
 	}
 	if user.IsBlocked {
+		// The caller gets the wrong-password answer; the block shows only in the audit entry.
 		metrics.RecordAuthAttempt(metrics.ResultFailure)
 		s.audit(ctx, user.ID, domain.AuditActionLoginFailed, formatID(user.ID), meta, map[string]any{"reason": "user_blocked"})
-		return nil, apperror.Unauthorized(msgAccountBlocked)
+		return nil, apperror.Unauthorized(msgLoginRejected)
 	}
 	s.resetAttempts(ctx, email)
 	metrics.RecordAuthAttempt(metrics.ResultSuccess)
@@ -265,8 +279,6 @@ func (s *AuthService) rejectCredentials(ctx context.Context, email string, userI
 	return nil
 }
 
-// lockWhenExceeded locks email once count reaches the configured limit and reports whether
-// the account is now locked.
 func (s *AuthService) lockWhenExceeded(ctx context.Context, email string, count int64) (bool, error) {
 	if count < int64(s.cfg.MaxLoginAttempts) {
 		return false, nil
@@ -286,19 +298,16 @@ func (s *AuthService) resetAttempts(ctx context.Context, email string) {
 	}
 }
 
-// attemptsUnavailable logs a login-attempt store failure and returns the error that refuses
-// the credential check until the store is back.
 func (s *AuthService) attemptsUnavailable(ctx context.Context, msg string, err error) error {
 	s.logger.FromContext(ctx).Error(msg, "error", err)
 	return apperror.ServiceUnavailable(msgLoginUnavailable)
 }
 
-// auditResourceID names the account of an audit entry: its id when known, else the address.
 func auditResourceID(email string, userID int64) string {
 	if userID != 0 {
 		return formatID(userID)
 	}
-	return email
+	return boundResourceID(email)
 }
 
 // audit records a security event; a failing audit store is logged, never surfaced.
@@ -314,22 +323,4 @@ func (s *AuthService) audit(ctx context.Context, actorID int64, action, resource
 	if err != nil {
 		s.logger.FromContext(ctx).Error(msgRecordAuditFailed, "action", action, "error", err)
 	}
-}
-
-var (
-	dummyHashOnce sync.Once
-	dummyHash     []byte
-)
-
-// dummyPasswordHash returns a bcrypt hash computed once at the cost used for real passwords.
-// Comparing an unknown account's password against it keeps the response time of unknown and
-// known accounts alike.
-func dummyPasswordHash() []byte {
-	dummyHashOnce.Do(func() {
-		hash, err := bcrypt.GenerateFromPassword([]byte("iam-service dummy password"), bcrypt.DefaultCost)
-		if err == nil {
-			dummyHash = hash
-		}
-	})
-	return dummyHash
 }

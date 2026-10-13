@@ -16,19 +16,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// keyPaths returns the private and public key paths inside a fresh temporary directory.
 func keyPaths(t *testing.T) (privPath, pubPath string) {
 	t.Helper()
 	dir := t.TempDir()
 	return filepath.Join(dir, "private.pem"), filepath.Join(dir, "public.pem")
 }
 
-// pemBytes encodes der as a PEM block of the given type.
 func pemBytes(blockType string, der []byte) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: blockType, Bytes: der})
 }
 
-// pkcs8PEM encodes key as a PKCS #8 "PRIVATE KEY" block.
 func pkcs8PEM(t *testing.T, key *rsa.PrivateKey) []byte {
 	t.Helper()
 	der, err := x509.MarshalPKCS8PrivateKey(key)
@@ -36,7 +33,6 @@ func pkcs8PEM(t *testing.T, key *rsa.PrivateKey) []byte {
 	return pemBytes("PRIVATE KEY", der)
 }
 
-// pkixPEM encodes key as a PKIX "PUBLIC KEY" block.
 func pkixPEM(t *testing.T, key *rsa.PublicKey) []byte {
 	t.Helper()
 	der, err := x509.MarshalPKIXPublicKey(key)
@@ -44,13 +40,11 @@ func pkixPEM(t *testing.T, key *rsa.PublicKey) []byte {
 	return pemBytes("PUBLIC KEY", der)
 }
 
-// writeFile writes data to path with a private mode.
 func writeFile(t *testing.T, path string, data []byte) {
 	t.Helper()
 	require.NoError(t, os.WriteFile(path, data, 0o600))
 }
 
-// pemType returns the type of the first PEM block in the file at path.
 func pemType(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)

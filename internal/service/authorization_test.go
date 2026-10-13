@@ -63,7 +63,6 @@ func newBrokenAuthz(t *testing.T) *AuthorizationService {
 	return svc
 }
 
-// policyCount returns the number of policy rules held by enforcer.
 func policyCount(t *testing.T, enforcer casbin.IEnforcer) int {
 	t.Helper()
 	policies, err := enforcer.GetPolicy()

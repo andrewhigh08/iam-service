@@ -21,23 +21,17 @@ type identity struct {
 	called    bool
 	userID    int64
 	sessionID string
-	email     string
-	roles     []string
 	ctxUserID int64
 }
 
-// capture records the caller identity stored in the gin and request contexts.
 func (id *identity) capture(c *gin.Context) {
 	id.called = true
 	id.userID = c.GetInt64(ContextKeyUserID)
 	id.sessionID = c.GetString(ContextKeySessionID)
-	id.email = c.GetString(ContextKeyEmail)
-	id.roles = c.GetStringSlice(ContextKeyRoles)
 	id.ctxUserID = logger.UserIDFromContext(c.Request.Context())
 	c.String(http.StatusOK, "ok")
 }
 
-// protectedRouter serves GET /me behind AuthMiddleware and records the identity it sees.
 func protectedRouter(f *authFixture, id *identity) *gin.Engine {
 	r := gin.New()
 	r.GET("/me", f.h.AuthMiddleware(), id.capture)
@@ -145,14 +139,11 @@ func TestAuthMiddleware_StoresTheCallerIdentity(t *testing.T) {
 			assert.True(t, id.called)
 			assert.Equal(t, testUserID, id.userID)
 			assert.Equal(t, testSessionID, id.sessionID)
-			assert.Equal(t, testEmail, id.email)
-			assert.Equal(t, []string{"admin"}, id.roles)
 			assert.Equal(t, testUserID, id.ctxUserID, "the request context carries the user id for logging")
 		})
 	}
 }
 
-// rbacRouter serves GET /users behind RBACMiddleware(users, read), optionally pre-authenticated.
 func rbacRouter(f *authFixture, withUser bool, called *bool) *gin.Engine {
 	r := gin.New()
 	handlers := []gin.HandlerFunc{}

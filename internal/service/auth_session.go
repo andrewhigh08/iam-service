@@ -103,13 +103,14 @@ func (s *AuthService) rejectUnknownRefresh(ctx context.Context, tokenHash string
 	return apperror.Unauthorized(msgRefreshRejected)
 }
 
-// revokeSessionAccessToken blacklists the access token issued with session for its remaining
-// lifetime. A session that recorded no token, or whose token has expired, needs nothing.
+// revokeSessionAccessToken blacklists the access token issued with session for as long as the
+// parser still accepts it. A session that recorded no token, or whose token is past that
+// point, needs nothing.
 func (s *AuthService) revokeSessionAccessToken(ctx context.Context, session *domain.Session) error {
 	if session == nil || session.AccessJTI == "" {
 		return nil
 	}
-	remaining := session.AccessExpiresAt.Sub(s.now())
+	remaining := s.blacklistTTL(session.AccessExpiresAt)
 	if remaining <= 0 {
 		return nil
 	}
@@ -117,6 +118,12 @@ func (s *AuthService) revokeSessionAccessToken(ctx context.Context, session *dom
 		return asInternal(msgRevokeTokenFailed, err)
 	}
 	return nil
+}
+
+// blacklistTTL returns how long a token expiring at exp must stay blacklisted: the parser
+// accepts it until exp plus the clock-skew leeway, so the entry has to live that long.
+func (s *AuthService) blacklistTTL(exp time.Time) time.Duration {
+	return exp.Sub(s.now()) + clockSkewLeeway
 }
 
 // Logout ends the session of refreshToken and blacklists its access token, as well as
@@ -174,17 +181,17 @@ func (s *AuthService) endSession(ctx context.Context, tokenHash string) (*domain
 	return session, nil
 }
 
-// revokeAccessToken blacklists the jti of a valid, unexpired access token for its remaining
-// lifetime. It returns the claims when the token could be parsed and whether it was
-// blacklisted; a token that does not parse is ignored, a blacklist that cannot be written is
-// an error.
+// revokeAccessToken blacklists the jti of an access token the parser accepts for as long as
+// it keeps accepting it. It returns the claims when the token could be parsed and whether it
+// was blacklisted; a token that does not parse is ignored, a blacklist that cannot be written
+// is an error.
 func (s *AuthService) revokeAccessToken(ctx context.Context, accessToken string) (*port.Claims, bool, error) {
 	claims, err := s.parseAccessToken(accessToken)
 	if err != nil {
 		s.logger.FromContext(ctx).Debug("access token not revoked at logout", "error", err)
 		return nil, false, nil
 	}
-	remaining := claims.ExpiresAt.Sub(s.now())
+	remaining := s.blacklistTTL(claims.ExpiresAt.Time)
 	if remaining <= 0 {
 		return claims, false, nil
 	}
@@ -207,8 +214,8 @@ func (s *AuthService) LogoutAll(ctx context.Context, userID int64, meta domain.C
 	return nil
 }
 
-// ListSessions returns the live sessions of the user, newest first, flagging the one whose
-// sid is currentSID.
+// ListSessions returns the live sessions of the user in the order the store keeps them,
+// newest first, flagging the one whose sid is currentSID.
 func (s *AuthService) ListSessions(ctx context.Context, userID int64, currentSID string) ([]domain.Session, error) {
 	sessions, err := s.deps.Sessions.ListForUser(ctx, userID)
 	if err != nil {
@@ -217,9 +224,6 @@ func (s *AuthService) ListSessions(ctx context.Context, userID int64, currentSID
 	for i := range sessions {
 		sessions[i].Current = currentSID != "" && sessions[i].ID == currentSID
 	}
-	slices.SortStableFunc(sessions, func(a, b domain.Session) int {
-		return b.CreatedAt.Compare(a.CreatedAt)
-	})
 	return sessions, nil
 }
 

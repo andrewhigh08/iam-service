@@ -20,7 +20,6 @@ const (
 	testPassword = "Secret123!"
 )
 
-// authRouter mounts the login, refresh, logout and logout-all endpoints of f.
 func authRouter(f *authFixture) *gin.Engine {
 	r := gin.New()
 	r.POST("/auth/login", f.h.Login)
@@ -30,10 +29,8 @@ func authRouter(f *authFixture) *gin.Engine {
 	return r
 }
 
-// issuedPair is the token pair the service hands out for the test user.
 var issuedPair = &port.TokenPair{AccessToken: "access-token", RefreshToken: "refresh-token", ExpiresIn: 900}
 
-// issuedLogin returns a login result carrying issuedPair, the test user and roles.
 func issuedLogin(roles []string) *port.LoginResult {
 	return &port.LoginResult{
 		Tokens: issuedPair,
@@ -101,6 +98,7 @@ func TestLogin_RejectsInvalidBodies(t *testing.T) {
 		{name: "missing password", body: LoginRequest{Email: testEmail}, wantFields: map[string]any{"password": "required"}},
 		{name: "missing everything", body: map[string]any{}, wantFields: map[string]any{"email": "required", "password": "required"}},
 		{name: "malformed email", body: LoginRequest{Email: "nope", Password: "x"}, wantFields: map[string]any{"email": "email"}},
+		{name: "overlong email", body: LoginRequest{Email: overlongEmail, Password: "x"}, wantFields: map[string]any{"email": "max=254"}},
 		{name: "wrong field type", body: `{"email":123,"password":"x"}`, wantFields: map[string]any{"email": "invalid type"}},
 		{name: "not an object", body: `[1,2]`, wantReason: "body must be a JSON object"},
 		{name: "malformed json", body: `{"email":`, wantReason: "body must be a JSON object"},

@@ -59,7 +59,7 @@ func TestBlockRevokesAccessAndUnblockRestoresIt(t *testing.T) {
 	assert.Equal(t, "invalid or expired token", denied.Message)
 	requireError(t, c.refresh(t, pair.RefreshToken), http.StatusUnauthorized, "UNAUTHORIZED")
 	rejected := requireError(t, c.login(t, acc.Email, acc.Password), http.StatusUnauthorized, "UNAUTHORIZED")
-	assert.Equal(t, "account is blocked", rejected.Message)
+	assert.Equal(t, "invalid credentials", rejected.Message, "a blocked account answers like a wrong password")
 	assert.True(t, c.getUser(t, admin, acc.ID).IsBlocked)
 
 	// Blocking again repeats the revocation instead of failing, so a block can be retried.

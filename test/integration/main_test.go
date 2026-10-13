@@ -60,7 +60,6 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// run boots the suite, runs the tests and tears the suite down whatever their outcome.
 func run(m *testing.M) (int, error) {
 	s, err := startSuite()
 	if err != nil {
@@ -71,7 +70,6 @@ func run(m *testing.M) (int, error) {
 	return m.Run(), nil
 }
 
-// env returns the shared environment, skipping the test when there is none.
 func env(t *testing.T) *suite {
 	t.Helper()
 	if shared == nil {
@@ -80,7 +78,6 @@ func env(t *testing.T) *suite {
 	return shared
 }
 
-// startSuite starts the containers and boots the application against them.
 func startSuite() (*suite, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), setupTimeout)
 	defer cancel()
@@ -97,8 +94,6 @@ func startSuite() (*suite, error) {
 	return s, nil
 }
 
-// boot creates the key directory, builds the configuration and starts the application
-// behind an httptest server.
 func (s *suite) boot(ctx context.Context) error {
 	keysDir, err := os.MkdirTemp("", "iam-integration-keys-")
 	if err != nil {
@@ -144,7 +139,6 @@ func (s *suite) stop() {
 	}
 }
 
-// dsnFor returns a database/sql connection URL for database name on the suite's PostgreSQL.
 func (s *suite) dsnFor(name string) string {
 	u := url.URL{
 		Scheme:   "postgres",
@@ -198,7 +192,6 @@ func newConfig(c *testContainers, keysDir, port string) *config.Config {
 	}
 }
 
-// freePort reserves a TCP port on the loopback interface, releases it and returns its number.
 func freePort() (string, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

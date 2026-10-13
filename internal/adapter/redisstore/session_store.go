@@ -125,10 +125,11 @@ func (s *SessionStore) Take(ctx context.Context, tokenHash string, keep time.Dur
 	return sess, nil
 }
 
-// ConsumedBy returns the user id recorded when Take consumed the session under tokenHash, or
-// 0 when the hash is unknown or the record has expired.
+// ConsumedBy returns the user id recorded when Take consumed the session under tokenHash and
+// deletes the record in the same command, so a replayed token is reported exactly once. It
+// returns 0 when the hash is unknown, already reported or expired.
 func (s *SessionStore) ConsumedBy(ctx context.Context, tokenHash string) (int64, error) {
-	userID, err := s.client.Get(ctx, rotatedSessionKey(tokenHash)).Int64()
+	userID, err := s.client.GetDel(ctx, rotatedSessionKey(tokenHash)).Int64()
 	if errors.Is(err, redis.Nil) {
 		return 0, nil
 	}
@@ -269,7 +270,6 @@ func sessionFields(sess domain.Session) map[string]any {
 	return fields
 }
 
-// unixOrZero renders t as unix seconds, or 0 for the zero time.
 func unixOrZero(t time.Time) int64 {
 	if t.IsZero() {
 		return 0
@@ -277,7 +277,6 @@ func unixOrZero(t time.Time) int64 {
 	return t.Unix()
 }
 
-// parseSession decodes the hash stored under tokenHash.
 func parseSession(tokenHash string, fields map[string]string) (*domain.Session, error) {
 	userID, err := strconv.ParseInt(fields[fieldUID], 10, 64)
 	if err != nil {
@@ -314,7 +313,6 @@ func parseSession(tokenHash string, fields map[string]string) (*domain.Session, 
 	return sess, nil
 }
 
-// parseUnix converts a unix-seconds string into a UTC time.
 func parseUnix(value string) (time.Time, error) {
 	sec, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
@@ -323,7 +321,6 @@ func parseUnix(value string) (time.Time, error) {
 	return time.Unix(sec, 0).UTC(), nil
 }
 
-// sidOf returns the session id that corresponds to tokenHash.
 func sidOf(tokenHash string) string {
 	if len(tokenHash) <= domain.SessionIDLength {
 		return tokenHash

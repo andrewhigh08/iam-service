@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -32,6 +33,21 @@ func TestAuthService_Login_UnknownUserIsRejectedAndCounted(t *testing.T) {
 	assert.Zero(t, event.ActorID)
 	assert.Equal(t, testEmail, event.ResourceID)
 	assert.Equal(t, map[string]any{"reason": "user_not_found", "attempts": int64(1), "locked": false}, event.Details)
+}
+
+func TestAuthService_Login_BoundsTheAuditResourceID(t *testing.T) {
+	t.Parallel()
+	f := newAuthFixture(t)
+	email := strings.Repeat("a", maxResourceIDBytes) + "@example.com"
+	f.attempts.EXPECT().IsLocked(gomock.Any(), email).Return(false, nil)
+	f.users.EXPECT().FindByEmail(gomock.Any(), email).Return(nil, apperror.NotFound("user", email))
+	f.attempts.EXPECT().RecordFailure(gomock.Any(), email, testLockout).Return(int64(1), nil)
+	event := expectAudit(f.audit, domain.AuditActionLoginFailed)
+
+	_, err := f.svc.Login(t.Context(), email, testPassword, f.meta)
+
+	requireAppError(t, err, apperror.CodeUnauthorized)
+	assert.Equal(t, strings.Repeat("a", maxResourceIDBytes), event.ResourceID, "the address is cut to what the audit store accepts")
 }
 
 func TestAuthService_Login_WrongPasswordCountsFailuresAndLocks(t *testing.T) {
@@ -88,7 +104,7 @@ func TestAuthService_Login_LockedAccountIsRejectedBeforeLookup(t *testing.T) {
 
 func TestAuthService_Login_BlockedUser(t *testing.T) {
 	t.Parallel()
-	t.Run("is rejected after the password check", func(t *testing.T) {
+	t.Run("gets the wrong-password answer after the password check", func(t *testing.T) {
 		t.Parallel()
 		f := newAuthFixture(t)
 		user := f.user()
@@ -101,9 +117,9 @@ func TestAuthService_Login_BlockedUser(t *testing.T) {
 
 		assert.Nil(t, res)
 		appErr := requireAppError(t, err, apperror.CodeUnauthorized)
-		assert.Equal(t, msgAccountBlocked, appErr.Message)
+		assert.Equal(t, msgLoginRejected, appErr.Message, "the block is not disclosed to the caller")
 		assert.Equal(t, user.ID, event.ActorID)
-		assert.Equal(t, map[string]any{"reason": "user_blocked"}, event.Details)
+		assert.Equal(t, map[string]any{"reason": "user_blocked"}, event.Details, "the audit entry keeps the real reason")
 	})
 	t.Run("with a wrong password is not told about the block", func(t *testing.T) {
 		t.Parallel()

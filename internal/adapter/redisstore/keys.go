@@ -5,7 +5,7 @@ import "strconv"
 // keyPrefix starts every key written by this package. The schema is:
 //
 //	iam:session:<tokenHash>         HASH {uid, sid, created_at, expires_at, ip, ua, jti, access_exp}; TTL = refresh TTL
-//	iam:session:rotated:<tokenHash> uid of the session Take consumed under the hash; TTL = refresh TTL
+//	iam:session:rotated:<tokenHash> uid of the session Take consumed under the hash, deleted by the first ConsumedBy; TTL = refresh TTL
 //	iam:user:<uid>:sessions         SET of token hashes; TTL extended to the refresh TTL on write
 //	iam:revoked:jti:<jti>           "1"; TTL = remaining access TTL
 //	iam:user:<uid>:revoked_before   unix seconds; TTL = access TTL plus grace

@@ -1,16 +1,64 @@
 package redisstore
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/andrewhigh08/iam-service/internal/domain"
+	"github.com/andrewhigh08/iam-service/internal/pkg/apperror"
 )
+
+func TestSessionStore_ConsumedBy(t *testing.T) {
+	t.Parallel()
+	hash := strings.Repeat("ef", 32)
+	tests := []struct {
+		name    string
+		answer  func(t *testing.T) *redis.StringCmd
+		want    int64
+		wantErr bool
+	}{
+		{
+			name:   "consumed hash is reported and its record removed in the same command",
+			answer: func(t *testing.T) *redis.StringCmd { return stringCmd(t, "42", nil) },
+			want:   42,
+		},
+		{
+			name:   "unknown, already reported or expired hash",
+			answer: func(t *testing.T) *redis.StringCmd { return stringCmd(t, "", redis.Nil) },
+		},
+		{
+			name:    "store failure",
+			answer:  func(t *testing.T) *redis.StringCmd { return stringCmd(t, "", errors.New("redis down")) },
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			client := &fakeClient{getDel: tt.answer(t)}
+
+			got, err := NewSessionStore(client).ConsumedBy(t.Context(), hash)
+
+			assert.Equal(t, rotatedSessionKey(hash), client.getDelKey, "GETDEL consumes the tombstone")
+			if tt.wantErr {
+				var appErr *apperror.AppError
+				require.ErrorAs(t, err, &appErr)
+				assert.Equal(t, apperror.CodeInternal, appErr.Code)
+				assert.Zero(t, got)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
 
 func TestSessionFields_RoundTrip(t *testing.T) {
 	t.Parallel()

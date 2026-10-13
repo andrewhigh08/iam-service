@@ -43,7 +43,7 @@ func TestAuthService_Refresh_RotatesSession(t *testing.T) {
 	gomock.InOrder(
 		f.sessions.EXPECT().Take(gomock.Any(), oldHash, testRefreshTTL).Return(current, nil),
 		f.users.EXPECT().FindByID(gomock.Any(), user.ID).Return(user, nil),
-		f.revocations.EXPECT().RevokeToken(gomock.Any(), current.AccessJTI, 10*time.Minute).Return(nil),
+		f.revocations.EXPECT().RevokeToken(gomock.Any(), current.AccessJTI, 10*time.Minute+clockSkewLeeway).Return(nil),
 		f.authz.EXPECT().RolesOf(gomock.Any(), user.ID).Return([]string{domain.RoleAnalyst}, nil),
 		create,
 	)
@@ -258,8 +258,8 @@ func TestAuthService_Refresh_ReplayRevokesEverySession(t *testing.T) {
 	gomock.InOrder(
 		f.sessions.EXPECT().Take(gomock.Any(), hash, testRefreshTTL).Return(nil, apperror.NotFound("session", hash)),
 		f.sessions.EXPECT().ConsumedBy(gomock.Any(), hash).Return(user.ID, nil),
-		f.sessions.EXPECT().DeleteAllForUser(gomock.Any(), user.ID).Return(2, nil),
 		f.revocations.EXPECT().RevokeUserTokensBefore(gomock.Any(), user.ID, f.now, testAccessTTL+revocationGrace).Return(nil),
+		f.sessions.EXPECT().DeleteAllForUser(gomock.Any(), user.ID).Return(2, nil),
 	)
 	event := expectAudit(f.audit, domain.AuditActionTokenReuse)
 
@@ -280,7 +280,7 @@ func TestAuthService_Refresh_ReplayRevocationFailureIsInternal(t *testing.T) {
 	token, hash, _ := refreshFixture(user, f.now, 's')
 	f.sessions.EXPECT().Take(gomock.Any(), hash, testRefreshTTL).Return(nil, apperror.NotFound("session", hash))
 	f.sessions.EXPECT().ConsumedBy(gomock.Any(), hash).Return(user.ID, nil)
-	f.sessions.EXPECT().DeleteAllForUser(gomock.Any(), user.ID).Return(0, errors.New("redis down"))
+	f.revocations.EXPECT().RevokeUserTokensBefore(gomock.Any(), user.ID, f.now, testAccessTTL+revocationGrace).Return(errors.New("redis down"))
 
 	_, err := f.svc.Refresh(t.Context(), token, f.meta)
 

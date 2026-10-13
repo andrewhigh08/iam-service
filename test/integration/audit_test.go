@@ -14,8 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// openDB opens a database/sql pool on database name of the suite's PostgreSQL and closes it
-// when the test ends.
 func openDB(t *testing.T, s *suite, name string) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("pgx", s.dsnFor(name))
@@ -25,7 +23,6 @@ func openDB(t *testing.T, s *suite, name string) *sql.DB {
 	return db
 }
 
-// auditRow is an audit_logs row as the tests read it.
 type auditRow struct {
 	ActorID      int64
 	ResourceType string
@@ -35,7 +32,6 @@ type auditRow struct {
 	CreatedAt    time.Time
 }
 
-// auditRows returns the entries recorded for action on resourceID, oldest first.
 func auditRows(t *testing.T, db *sql.DB, action, resourceID string) []auditRow {
 	t.Helper()
 	rows, err := db.QueryContext(t.Context(), `

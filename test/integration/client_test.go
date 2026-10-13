@@ -32,7 +32,6 @@ type apiClient struct {
 	http    *http.Client
 }
 
-// newClient returns a client for the shared server, skipping the test when there is none.
 func newClient(t *testing.T) *apiClient {
 	t.Helper()
 	s := env(t)
@@ -42,7 +41,6 @@ func newClient(t *testing.T) *apiClient {
 // rawBody is a request body sent verbatim instead of being encoded as JSON.
 type rawBody string
 
-// envelope is the JSON envelope every endpoint of the API answers with.
 type envelope struct {
 	Success bool            `json:"success"`
 	Data    json.RawMessage `json:"data"`
@@ -50,14 +48,12 @@ type envelope struct {
 	Meta    *metaBody       `json:"meta"`
 }
 
-// errorBody is the error part of the envelope.
 type errorBody struct {
 	Code    string         `json:"code"`
 	Message string         `json:"message"`
 	Details map[string]any `json:"details"`
 }
 
-// metaBody is the pagination part of the envelope.
 type metaBody struct {
 	Page       int   `json:"page"`
 	PageSize   int   `json:"page_size"`
@@ -85,7 +81,6 @@ func (c *apiClient) do(t *testing.T, method, path string, body any, token string
 	return c.send(t, req)
 }
 
-// newRequest builds a request for path with body encoded as JSON, or sent verbatim for a rawBody.
 func (c *apiClient) newRequest(t *testing.T, method, path string, body any) *http.Request {
 	t.Helper()
 	var reader io.Reader = http.NoBody
@@ -106,7 +101,6 @@ func (c *apiClient) newRequest(t *testing.T, method, path string, body any) *htt
 	return req
 }
 
-// send executes req, reads the whole body and decodes the envelope of a JSON answer.
 func (c *apiClient) send(t *testing.T, req *http.Request) apiResponse {
 	t.Helper()
 	resp, err := c.http.Do(req)
@@ -122,21 +116,17 @@ func (c *apiClient) send(t *testing.T, req *http.Request) apiResponse {
 	return out
 }
 
-// decode unmarshals the data field of the envelope into dst.
 func (r apiResponse) decode(t *testing.T, dst any) {
 	t.Helper()
 	require.NotEmptyf(t, r.Data, "response carries no data: %s", r.Body)
 	require.NoErrorf(t, json.Unmarshal(r.Data, dst), "decode data %s", r.Data)
 }
 
-// requireStatus fails the test unless resp has the expected status, showing the body otherwise.
 func requireStatus(t *testing.T, resp apiResponse, status int) {
 	t.Helper()
 	require.Equalf(t, status, resp.Status, "unexpected status, body: %s", resp.Body)
 }
 
-// requireError checks that resp is a failed envelope with the given status and error code and
-// returns its error body for further assertions.
 func requireError(t *testing.T, resp apiResponse, status int, code string) errorBody {
 	t.Helper()
 	requireStatus(t, resp, status)
@@ -147,7 +137,6 @@ func requireError(t *testing.T, resp apiResponse, status int, code string) error
 	return *resp.Error
 }
 
-// fieldRule returns the binding rule reported for field in the error details, or "".
 func fieldRule(e errorBody, field string) string {
 	fields, _ := e.Details["fields"].(map[string]any)
 	rule, _ := fields[field].(string)
@@ -170,7 +159,6 @@ type loginData struct {
 	Reason                string    `json:"reason"`
 }
 
-// userInfo identifies the logged-in user.
 type userInfo struct {
 	ID    int64    `json:"id"`
 	Email string   `json:"email"`
@@ -245,7 +233,6 @@ type account struct {
 	Password string
 }
 
-// accessClaims are the claims of an access token the tests look at.
 type accessClaims struct {
 	UserID    int64    `json:"uid"`
 	Email     string   `json:"email"`
@@ -263,13 +250,11 @@ func parseClaims(t *testing.T, token string) accessClaims {
 	return claims
 }
 
-// login posts the credentials and returns the raw answer.
 func (c *apiClient) login(t *testing.T, email, password string) apiResponse {
 	t.Helper()
 	return c.do(t, http.MethodPost, "/auth/login", map[string]string{"email": email, "password": password}, "")
 }
 
-// mustLogin logs in and requires a token pair in the answer.
 func (c *apiClient) mustLogin(t *testing.T, email, password string) loginData {
 	t.Helper()
 	resp := c.login(t, email, password)
@@ -281,38 +266,31 @@ func (c *apiClient) mustLogin(t *testing.T, email, password string) loginData {
 	return data
 }
 
-// adminToken logs the seeded administrator in and returns the access token.
 func (c *apiClient) adminToken(t *testing.T) string {
 	t.Helper()
 	return c.mustLogin(t, adminEmail, adminPassword).AccessToken
 }
 
-// refresh posts refreshToken to /auth/refresh.
 func (c *apiClient) refresh(t *testing.T, refreshToken string) apiResponse {
 	t.Helper()
 	return c.do(t, http.MethodPost, "/auth/refresh", map[string]string{"refresh_token": refreshToken}, "")
 }
 
-// sessions lists the sessions of the caller identified by token.
 func (c *apiClient) sessions(t *testing.T, token string) apiResponse {
 	t.Helper()
 	return c.do(t, http.MethodGet, "/api/v1/sessions", nil, token)
 }
 
-// createUser posts req to /api/v1/users as the caller identified by token.
 func (c *apiClient) createUser(t *testing.T, token string, req createUserRequest) apiResponse {
 	t.Helper()
 	return c.do(t, http.MethodPost, "/api/v1/users", req, token)
 }
 
-// mustCreateUser creates a user with role and the initial password, permanent or temporary,
-// as the administrator identified by adminToken, and returns the account.
 func (c *apiClient) mustCreateUser(t *testing.T, adminToken, role string, temporary bool) account {
 	t.Helper()
 	return c.mustCreateUserWithEmail(t, adminToken, uniqueEmail(t), role, temporary)
 }
 
-// mustCreateUserWithEmail is mustCreateUser for a caller-chosen address.
 func (c *apiClient) mustCreateUserWithEmail(t *testing.T, adminToken, email, role string, temporary bool) account {
 	t.Helper()
 	acc := account{Email: email, Password: initialPassword}
@@ -331,7 +309,6 @@ func (c *apiClient) mustCreateUserWithEmail(t *testing.T, adminToken, email, rol
 	return acc
 }
 
-// getUser fetches user id as the caller identified by token and requires success.
 func (c *apiClient) getUser(t *testing.T, token string, id int64) userData {
 	t.Helper()
 	resp := c.do(t, http.MethodGet, userPath(id, ""), nil, token)
@@ -341,8 +318,6 @@ func (c *apiClient) getUser(t *testing.T, token string, id int64) userData {
 	return user
 }
 
-// userPath returns the path of the user endpoint for id, with an optional action suffix such
-// as "/block".
 func userPath(id int64, action string) string {
 	return "/api/v1/users/" + strconv.FormatInt(id, 10) + action
 }
@@ -370,7 +345,6 @@ func uniquePrefix(t *testing.T) string {
 	return emailPrefix(t) + "-" + strings.ToLower(rand.Text()[:8])
 }
 
-// uniqueEmail returns an address built on uniquePrefix.
 func uniqueEmail(t *testing.T) string {
 	t.Helper()
 	return uniquePrefix(t) + "@example.com"

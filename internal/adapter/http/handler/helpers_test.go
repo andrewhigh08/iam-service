@@ -32,6 +32,9 @@ const (
 // testMeta is the client identity the handlers derive from a request built by newRequest.
 var testMeta = domain.ClientMeta{IP: testIP, UserAgent: testUserAgent}
 
+// overlongEmail is a well-formed address one character longer than the 254 the API accepts.
+var overlongEmail = strings.Repeat("a", 255-len("@example.com")) + "@example.com"
+
 // testActor is the actor the handlers derive from an authenticated request.
 var testActor = domain.Actor{UserID: testUserID, ClientMeta: testMeta}
 
@@ -74,7 +77,6 @@ func newUserFixture(t *testing.T) *userFixture {
 	return f
 }
 
-// newTestLogger returns a debug-level JSON logger writing into buf.
 func newTestLogger(buf *bytes.Buffer) *logger.Logger {
 	return logger.New(logger.Config{Level: "debug", Format: "json", Output: buf})
 }
@@ -109,14 +111,12 @@ func newRequest(t *testing.T, method, target string, body any) *http.Request {
 	return req
 }
 
-// serve runs req through h and returns the recorded response.
 func serve(h http.Handler, req *http.Request) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
 }
 
-// envelope is the response envelope with a typed data section.
 type envelope[T any] struct {
 	Success bool                `json:"success"`
 	Data    T                   `json:"data"`
@@ -124,7 +124,6 @@ type envelope[T any] struct {
 	Meta    *response.Meta      `json:"meta"`
 }
 
-// decode parses the envelope in rec with data of type T.
 func decode[T any](t *testing.T, rec *httptest.ResponseRecorder) envelope[T] {
 	t.Helper()
 	var env envelope[T]
@@ -132,7 +131,6 @@ func decode[T any](t *testing.T, rec *httptest.ResponseRecorder) envelope[T] {
 	return env
 }
 
-// decodeSuccess asserts a successful envelope with the given status and returns its data.
 func decodeSuccess[T any](t *testing.T, rec *httptest.ResponseRecorder, status int) T {
 	t.Helper()
 	require.Equal(t, status, rec.Code, "body: %s", rec.Body.String())
@@ -142,7 +140,6 @@ func decodeSuccess[T any](t *testing.T, rec *httptest.ResponseRecorder, status i
 	return env.Data
 }
 
-// assertError asserts an error envelope with the given status, code and message and returns it.
 func assertError(t *testing.T, rec *httptest.ResponseRecorder, status int, code, message string) *response.ErrorBody {
 	t.Helper()
 	require.Equal(t, status, rec.Code, "body: %s", rec.Body.String())
@@ -155,7 +152,6 @@ func assertError(t *testing.T, rec *httptest.ResponseRecorder, status int, code,
 	return env.Error
 }
 
-// validationFields returns the per-field rules of a validation error envelope.
 func validationFields(t *testing.T, errBody *response.ErrorBody) map[string]any {
 	t.Helper()
 	fields, ok := errBody.Details["fields"].(map[string]any)
@@ -163,7 +159,6 @@ func validationFields(t *testing.T, errBody *response.ErrorBody) map[string]any 
 	return fields
 }
 
-// logRecords parses every JSON line written to buf, in order.
 func logRecords(t *testing.T, buf *bytes.Buffer) []map[string]any {
 	t.Helper()
 	lines := bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte("\n"))
@@ -179,7 +174,6 @@ func logRecords(t *testing.T, buf *bytes.Buffer) []map[string]any {
 	return records
 }
 
-// assertErrorLogged asserts that buf holds an ERROR record with the given message.
 func assertErrorLogged(t *testing.T, buf *bytes.Buffer, msg string) {
 	t.Helper()
 	for _, rec := range logRecords(t, buf) {

@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/andrewhigh08/iam-service/internal/domain"
 	"github.com/andrewhigh08/iam-service/internal/pkg/validator"
@@ -84,6 +85,16 @@ func TestNewAuthService_AppliesDefaults(t *testing.T) {
 	assert.Equal(t, defaultIssuer, svc.cfg.Issuer)
 	assert.Equal(t, validator.DefaultPolicy(), svc.cfg.PasswordPolicy)
 	assert.True(t, isHex(svc.kid, kidLength))
+}
+
+func TestNewAuthService_PreparesTheDummyHashUpFront(t *testing.T) {
+	t.Parallel()
+	f := newAuthFixture(t)
+
+	require.NoError(t, bcrypt.CompareHashAndPassword(f.svc.dummyHash, []byte(dummyPassword)))
+	cost, err := bcrypt.Cost(f.svc.dummyHash)
+	require.NoError(t, err)
+	assert.Equal(t, bcrypt.DefaultCost, cost, "an unknown account costs the same bcrypt work as a known one")
 }
 
 func TestAuthService_Login_IssuesTokenPair(t *testing.T) {

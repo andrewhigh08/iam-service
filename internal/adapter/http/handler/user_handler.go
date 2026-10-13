@@ -46,7 +46,7 @@ type ListUsersResponse struct {
 // CreateUserRequest is the body of POST /api/v1/users. PasswordTemporary forces a password
 // change at the first login.
 type CreateUserRequest struct {
-	Email             string `json:"email" binding:"required,email"`
+	Email             string `json:"email" binding:"required,max=254,email"`
 	Password          string `json:"password" binding:"required"`
 	FullName          string `json:"full_name" binding:"required"`
 	Role              string `json:"role" binding:"required,oneof=admin analyst viewer"`
@@ -229,7 +229,6 @@ func userIDParam(c *gin.Context) (int64, bool) {
 	return id, true
 }
 
-// queryInt returns the integer query parameter name, or def when it is absent or not an integer.
 func queryInt(c *gin.Context, name string, def int) int {
 	raw := c.Query(name)
 	if raw == "" {
@@ -242,7 +241,6 @@ func queryInt(c *gin.Context, name string, def int) int {
 	return n
 }
 
-// newUserResponse maps a user to its DTO with the timestamp in UTC.
 func newUserResponse(u *domain.User) UserResponse {
 	return UserResponse{
 		ID:        u.ID,

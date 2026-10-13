@@ -12,14 +12,14 @@ type ChangePasswordRequest struct {
 
 // ChangeRequiredPasswordRequest is the body of POST /auth/change-password.
 type ChangeRequiredPasswordRequest struct {
-	Email       string `json:"email" binding:"required,email"`
+	Email       string `json:"email" binding:"required,max=254,email"`
 	OldPassword string `json:"old_password" binding:"required"`
 	NewPassword string `json:"new_password" binding:"required"`
 }
 
 // ChangePassword handles POST /api/v1/change-password.
 // @Summary Change password
-// @Description Replaces the caller's password, ends every other session and returns a fresh token pair. The new password must satisfy the password policy.
+// @Description Replaces the caller's password, ends every session including the caller's and returns a fresh token pair. The new password must satisfy the password policy.
 // @Tags auth
 // @Security BearerAuth
 // @Accept json

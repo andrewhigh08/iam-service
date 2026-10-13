@@ -58,7 +58,6 @@ func (c *testContainers) Terminate(ctx context.Context) error {
 	return errors.Join(terminate(ctx, c.Redis), terminate(ctx, c.Postgres))
 }
 
-// startPostgres runs the PostgreSQL image and returns its endpoint.
 func startPostgres(ctx context.Context) (testcontainers.Container, endpoint, error) {
 	container, err := testcontainers.Run(ctx, postgresImage,
 		testcontainers.WithExposedPorts(postgresPort),
@@ -77,7 +76,6 @@ func startPostgres(ctx context.Context) (testcontainers.Container, endpoint, err
 	return started(ctx, container, postgresPort, err)
 }
 
-// startRedis runs the Redis image and returns its endpoint.
 func startRedis(ctx context.Context) (testcontainers.Container, endpoint, error) {
 	container, err := testcontainers.Run(ctx, redisImage,
 		testcontainers.WithExposedPorts(redisPort),

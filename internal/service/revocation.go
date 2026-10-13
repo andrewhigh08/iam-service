@@ -18,17 +18,18 @@ type accessRevoker struct {
 	accessTTL   time.Duration
 }
 
-// revokeAll deletes every session of the user and then records now as the revocation
-// instant, so that any session live afterwards is known to have been opened after it. It
-// returns the number of sessions removed.
+// revokeAll records now as the revocation instant of the user and then deletes every session
+// of the user, in that order: a session that survives the deletion was opened after the
+// instant was recorded, so its tokens are never older than the instant. It returns the number
+// of sessions removed.
 func (r accessRevoker) revokeAll(ctx context.Context, userID int64, now time.Time) (int, error) {
+	keep := r.accessTTL + revocationGrace
+	if err := r.revocations.RevokeUserTokensBefore(ctx, userID, now, keep); err != nil {
+		return 0, asInternal("failed to revoke access tokens", err)
+	}
 	removed, err := r.sessions.DeleteAllForUser(ctx, userID)
 	if err != nil {
 		return 0, asInternal("failed to delete sessions", err)
-	}
-	keep := r.accessTTL + revocationGrace
-	if err := r.revocations.RevokeUserTokensBefore(ctx, userID, now, keep); err != nil {
-		return removed, asInternal("failed to revoke access tokens", err)
 	}
 	return removed, nil
 }

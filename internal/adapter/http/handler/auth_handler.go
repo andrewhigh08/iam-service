@@ -22,7 +22,7 @@ func NewAuthHandler(auth port.AuthService, authz port.AuthorizationService, log 
 
 // LoginRequest is the body of POST /auth/login.
 type LoginRequest struct {
-	Email    string `json:"email" binding:"required,email"`
+	Email    string `json:"email" binding:"required,max=254,email"`
 	Password string `json:"password" binding:"required"`
 }
 
@@ -180,7 +180,6 @@ func (h *AuthHandler) LogoutAll(c *gin.Context) {
 	response.Success(c, MessageResponse{Message: "logged out from all sessions"})
 }
 
-// respondTokenPair writes pair as a 200 response, or err when the service call failed.
 func (h *AuthHandler) respondTokenPair(c *gin.Context, pair *port.TokenPair, err error) {
 	if err != nil {
 		response.Error(c, err)

@@ -8,8 +8,8 @@ import (
 	"github.com/andrewhigh08/iam-service/internal/pkg/logger"
 )
 
-// AuthMiddleware validates the bearer access token and stores the caller's user id, session id,
-// email and roles in the gin context. It answers 503 when token validation is unavailable.
+// AuthMiddleware validates the bearer access token and stores the caller's user id and session
+// id in the gin context. It answers 503 when token validation is unavailable.
 func (h *AuthHandler) AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.GetHeader("Authorization") == "" {
@@ -36,8 +36,6 @@ func (h *AuthHandler) AuthMiddleware() gin.HandlerFunc {
 
 		c.Set(ContextKeyUserID, claims.UserID)
 		c.Set(ContextKeySessionID, claims.SessionID)
-		c.Set(ContextKeyEmail, claims.Email)
-		c.Set(ContextKeyRoles, claims.Roles)
 		c.Request = c.Request.WithContext(logger.WithUserIDContext(c.Request.Context(), claims.UserID))
 		c.Next()
 	}
@@ -70,13 +68,11 @@ func (h *AuthHandler) RBACMiddleware(resource, action string) gin.HandlerFunc {
 	}
 }
 
-// abortUnauthorized writes a 401 response and stops the chain.
 func abortUnauthorized(c *gin.Context, message string) {
 	response.Unauthorized(c, message)
 	c.Abort()
 }
 
-// isServiceUnavailable reports whether err is an AppError with the service-unavailable code.
 func isServiceUnavailable(err error) bool {
 	appErr, ok := apperror.AsAppError(err)
 	return ok && appErr.Code == apperror.CodeServiceUnavailable

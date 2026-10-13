@@ -16,8 +16,6 @@ import (
 	"github.com/andrewhigh08/iam-service/internal/port"
 )
 
-// expectUnlocked expects the lock probe and the counter reset of an authenticated password
-// change whose old password is right.
 func (f *authFixture) expectUnlocked(user *domain.User) {
 	f.attempts.EXPECT().IsLocked(gomock.Any(), user.Email).Return(false, nil)
 	f.attempts.EXPECT().Reset(gomock.Any(), user.Email).Return(nil)
@@ -36,15 +34,13 @@ func (f *authFixture) expectPasswordReplacement(user *domain.User, removed int) 
 				*written = hash
 				return nil
 			}),
-		f.sessions.EXPECT().DeleteAllForUser(gomock.Any(), user.ID).Return(removed, nil),
 		f.revocations.EXPECT().RevokeUserTokensBefore(gomock.Any(), user.ID, f.now, testAccessTTL+revocationGrace).Return(nil),
+		f.sessions.EXPECT().DeleteAllForUser(gomock.Any(), user.ID).Return(removed, nil),
 		create,
 	)
 	return written, stored
 }
 
-// assertPasswordReplaced checks that the written hash carries newPassword, that the user in
-// memory follows the stored state, and that pair belongs to the stored session.
 func assertPasswordReplaced(t *testing.T, f *authFixture, user *domain.User, written string, stored *domain.Session, pair *port.TokenPair, newPassword string) {
 	t.Helper()
 	require.NoError(t, bcrypt.CompareHashAndPassword([]byte(written), []byte(newPassword)))
@@ -220,10 +216,10 @@ func TestAuthService_ChangePassword_Rejections(t *testing.T) {
 				f.users.EXPECT().FindByID(gomock.Any(), user.ID).Return(user, nil)
 				f.expectUnlocked(user)
 				f.users.EXPECT().UpdatePassword(gomock.Any(), user.ID, gomock.Any(), false, f.now).Return(nil)
-				f.sessions.EXPECT().DeleteAllForUser(gomock.Any(), user.ID).Return(0, boom)
+				f.revocations.EXPECT().RevokeUserTokensBefore(gomock.Any(), user.ID, f.now, testAccessTTL+revocationGrace).Return(boom)
 			},
 			code:    apperror.CodeInternal,
-			message: "failed to delete sessions",
+			message: "failed to revoke access tokens",
 		},
 	}
 	for _, tc := range tests {

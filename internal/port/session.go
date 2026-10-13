@@ -18,13 +18,15 @@ type SessionStore interface {
 	// refresh token presented concurrently yields exactly one session. The hash is remembered as
 	// consumed for keep. Returns apperror.NotFound when there is no such session.
 	Take(ctx context.Context, tokenHash string, keep time.Duration) (*domain.Session, error)
-	// ConsumedBy returns the id of the user whose session Take removed under tokenHash, or 0
-	// when the hash is unknown or the record has expired.
+	// ConsumedBy returns the id of the user whose session Take removed under tokenHash and
+	// forgets the record in the same step, so a replayed token is reported exactly once. It
+	// returns 0 when the hash is unknown, already reported or expired.
 	ConsumedBy(ctx context.Context, tokenHash string) (int64, error)
 	// Delete removes the session stored under tokenHash. Deleting a missing session is not an error.
 	Delete(ctx context.Context, tokenHash string) error
 	// DeleteAllForUser removes every session of the user and returns how many were removed.
 	DeleteAllForUser(ctx context.Context, userID int64) (int, error)
-	// ListForUser returns the live sessions of the user; expired entries are pruned on read.
+	// ListForUser returns the live sessions of the user, newest first; the store owns the
+	// ordering and callers keep it. Expired entries are pruned on read.
 	ListForUser(ctx context.Context, userID int64) ([]domain.Session, error)
 }

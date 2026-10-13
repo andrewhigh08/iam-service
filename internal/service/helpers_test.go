@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/crypto/bcrypt"
@@ -49,7 +50,6 @@ var (
 	})
 )
 
-// testKeys returns the signing key pair of the service under test.
 func testKeys(t *testing.T) (*rsa.PrivateKey, *rsa.PublicKey) {
 	t.Helper()
 	key, err := signingKey()
@@ -65,7 +65,6 @@ func shortKeys(t *testing.T) (*rsa.PrivateKey, *rsa.PublicKey) {
 	return key, &key.PublicKey
 }
 
-// foreignKeys returns a key pair unrelated to the service under test.
 func foreignKeys(t *testing.T) (*rsa.PrivateKey, *rsa.PublicKey) {
 	t.Helper()
 	key, err := foreignKey()
@@ -73,9 +72,9 @@ func foreignKeys(t *testing.T) (*rsa.PrivateKey, *rsa.PublicKey) {
 	return key, &key.PublicKey
 }
 
-// hashPassword returns a bcrypt hash of pw at the minimum cost; the services verify hashes of
-// any cost, and the cheap cost keeps the fixtures fast.
-func hashPassword(t *testing.T, pw string) string {
+// testPasswordHash returns a bcrypt hash of pw at the minimum cost; the services verify
+// hashes of any cost, and the cheap cost keeps the fixtures fast.
+func testPasswordHash(t *testing.T, pw string) string {
 	t.Helper()
 	hash, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.MinCost)
 	require.NoError(t, err)
@@ -89,7 +88,7 @@ func newTestUser(t *testing.T, now time.Time) *domain.User {
 	return &domain.User{
 		ID:                testUserID,
 		Email:             testEmail,
-		PasswordHash:      hashPassword(t, testPassword),
+		PasswordHash:      testPasswordHash(t, testPassword),
 		PasswordChangedAt: now.Add(-time.Hour),
 		FullName:          "Alice Example",
 		CreatedAt:         now.Add(-24 * time.Hour),
@@ -97,7 +96,6 @@ func newTestUser(t *testing.T, now time.Time) *domain.User {
 	}
 }
 
-// testAuthConfig returns a valid AuthService configuration built on the shared signing key.
 func testAuthConfig(t *testing.T) AuthConfig {
 	t.Helper()
 	priv, pub := testKeys(t)
@@ -153,7 +151,6 @@ func newAuthFixture(t *testing.T, opts ...func(*AuthConfig)) *authFixture {
 	return f
 }
 
-// deps returns the mock collaborators as AuthDeps.
 func (f *authFixture) deps() AuthDeps {
 	return AuthDeps{
 		Users:       f.users,
@@ -165,21 +162,16 @@ func (f *authFixture) deps() AuthDeps {
 	}
 }
 
-// user returns an active user whose password is testPassword.
 func (f *authFixture) user() *domain.User {
 	return newTestUser(f.t, f.now)
 }
 
-// expectCredentialsOK expects the store calls of a successful password check for user: the
-// lock probe, the lookup and the reset of the failure counter.
 func (f *authFixture) expectCredentialsOK(user *domain.User) {
 	f.attempts.EXPECT().IsLocked(gomock.Any(), user.Email).Return(false, nil)
 	f.users.EXPECT().FindByEmail(gomock.Any(), user.Email).Return(user, nil)
 	f.attempts.EXPECT().Reset(gomock.Any(), user.Email).Return(nil)
 }
 
-// expectIssue expects the role lookup and the session creation of a token issue for user and
-// returns the session as it was stored.
 func (f *authFixture) expectIssue(user *domain.User, roles []string) *domain.Session {
 	f.authz.EXPECT().RolesOf(gomock.Any(), user.ID).Return(roles, nil)
 	stored, _ := f.expectSessionCreate()
@@ -198,7 +190,6 @@ func (f *authFixture) expectSessionCreate() (*domain.Session, *gomock.Call) {
 	return stored, call
 }
 
-// issuedToken signs an access token for user and sid at the fixture clock, as Login does.
 func (f *authFixture) issuedToken(user *domain.User, sid string) string {
 	f.t.Helper()
 	token, _, err := f.svc.signAccessToken(user, []string{domain.RoleViewer}, sid, f.now)
@@ -206,7 +197,6 @@ func (f *authFixture) issuedToken(user *domain.User, sid string) string {
 	return token
 }
 
-// parseClaims verifies token against the signing key and returns its claims.
 func (f *authFixture) parseClaims(token string) *port.Claims {
 	f.t.Helper()
 	claims := &port.Claims{}
@@ -218,12 +208,10 @@ func (f *authFixture) parseClaims(token string) *port.Claims {
 	return claims
 }
 
-// auditAction matches audit events by action.
 func auditAction(action string) gomock.Matcher {
 	return gomock.Cond(func(e domain.AuditEvent) bool { return e.Action == action })
 }
 
-// expectAudit expects one audit event with action and returns it as recorded.
 func expectAudit(audit *mocks.MockAuditService, action string) *domain.AuditEvent {
 	recorded := &domain.AuditEvent{}
 	audit.EXPECT().Record(gomock.Any(), auditAction(action)).
@@ -234,7 +222,6 @@ func expectAudit(audit *mocks.MockAuditService, action string) *domain.AuditEven
 	return recorded
 }
 
-// requireAppError asserts that err is an application error with code and returns it.
 func requireAppError(t *testing.T, err error, code string) *apperror.AppError {
 	t.Helper()
 	var appErr *apperror.AppError
@@ -243,8 +230,50 @@ func requireAppError(t *testing.T, err error, code string) *apperror.AppError {
 	return appErr
 }
 
-// isHex reports whether s is a lower-case hex string of n digits.
 func isHex(s string, n int) bool {
 	_, err := hex.DecodeString(s)
 	return err == nil && len(s) == n && strings.ToLower(s) == s
+}
+
+func TestHashPassword_UsesTheDefaultCost(t *testing.T) {
+	t.Parallel()
+
+	hash, err := hashPassword(testPassword)
+
+	require.NoError(t, err)
+	require.NoError(t, bcrypt.CompareHashAndPassword([]byte(hash), []byte(testPassword)))
+	cost, err := bcrypt.Cost([]byte(hash))
+	require.NoError(t, err)
+	assert.Equal(t, bcrypt.DefaultCost, cost)
+}
+
+func TestHashPassword_ReportsBcryptFailures(t *testing.T) {
+	t.Parallel()
+
+	hash, err := hashPassword(strings.Repeat("x", 73)) // bcrypt hashes at most 72 bytes
+
+	assert.Empty(t, hash)
+	appErr := requireAppError(t, err, apperror.CodeInternal)
+	assert.Equal(t, msgHashingFailed, appErr.Message)
+	require.ErrorIs(t, err, bcrypt.ErrPasswordTooLong)
+}
+
+func TestBoundResourceID(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"short id is untouched", testEmail, testEmail},
+		{"id at the limit is untouched", strings.Repeat("a", maxResourceIDBytes), strings.Repeat("a", maxResourceIDBytes)},
+		{"longer id is cut at the limit", strings.Repeat("a", maxResourceIDBytes+1), strings.Repeat("a", maxResourceIDBytes)},
+		{"a character is never split", strings.Repeat("a", maxResourceIDBytes-1) + "éé", strings.Repeat("a", maxResourceIDBytes-1)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, boundResourceID(tt.in))
+		})
+	}
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/andrewhigh08/iam-service/internal/domain"
 	"github.com/andrewhigh08/iam-service/internal/pkg/apperror"
+	"github.com/andrewhigh08/iam-service/internal/port"
 	"github.com/andrewhigh08/iam-service/test/mocks"
 )
 
@@ -31,21 +32,42 @@ type seederFixture struct {
 	enforcer casbin.IEnforcer
 }
 
-// newSeederFixture builds a Seeder on fresh collaborators.
 func newSeederFixture(t *testing.T) *seederFixture {
 	t.Helper()
 	authz, enforcer := newAuthz(t)
 	users := mocks.NewMockUserRepository(gomock.NewController(t))
+	seeder, err := NewSeeder(users, authz, nil)
+	require.NoError(t, err)
 	return &seederFixture{
-		seeder:   &Seeder{Users: users, Authz: authz},
+		seeder:   seeder,
 		users:    users,
 		authz:    authz,
 		enforcer: enforcer,
 	}
 }
 
-// expectAdminInsert expects the lookup and the insert of the administrator, assigns createdID
-// to it and returns the inserted user.
+func TestNewSeeder_RejectsMissingDependencies(t *testing.T) {
+	t.Parallel()
+	f := newSeederFixture(t)
+	tests := []struct {
+		name  string
+		users port.UserRepository
+		authz PolicyAuthorizer
+	}{
+		{"nothing", nil, nil},
+		{"users only", f.users, nil},
+		{"authz only", nil, f.authz},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			seeder, err := NewSeeder(tc.users, tc.authz, nil)
+			require.ErrorContains(t, err, "are required")
+			assert.Nil(t, seeder)
+		})
+	}
+}
+
 func (f *seederFixture) expectAdminInsert() *domain.User {
 	inserted := &domain.User{}
 	f.users.EXPECT().FindByEmail(gomock.Any(), adminEmail).Return(nil, apperror.NotFound("user", adminEmail))
@@ -57,11 +79,11 @@ func (f *seederFixture) expectAdminInsert() *domain.User {
 	return inserted
 }
 
-// existingAdmin is the administrator account as the repository returns it once it exists.
 func existingAdmin() *domain.User {
 	return &domain.User{ID: createdID, Email: adminEmail, FullName: adminFullName}
 }
 
+// TestSeeder_Seed_RequiresDependencies covers a Seeder built as a literal, which Seed checks itself.
 func TestSeeder_Seed_RequiresDependencies(t *testing.T) {
 	t.Parallel()
 	f := newSeederFixture(t)

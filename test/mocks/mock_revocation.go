@@ -41,6 +41,22 @@ func (m *MockRevocationStore) EXPECT() *MockRevocationStoreMockRecorder {
 	return m.recorder
 }
 
+// Check mocks base method.
+func (m *MockRevocationStore) Check(ctx context.Context, jti string, userID int64) (bool, time.Time, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Check", ctx, jti, userID)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(time.Time)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// Check indicates an expected call of Check.
+func (mr *MockRevocationStoreMockRecorder) Check(ctx, jti, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Check", reflect.TypeOf((*MockRevocationStore)(nil).Check), ctx, jti, userID)
+}
+
 // IsTokenRevoked mocks base method.
 func (m *MockRevocationStore) IsTokenRevoked(ctx context.Context, jti string) (bool, error) {
 	m.ctrl.T.Helper()

@@ -69,7 +69,6 @@ func (s *AuditService) ListByActor(ctx context.Context, actorID int64, limit int
 	return entries, nil
 }
 
-// optionalString returns nil for an empty string and a pointer to v otherwise.
 func optionalString(v string) *string {
 	if v == "" {
 		return nil

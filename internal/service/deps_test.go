@@ -9,7 +9,6 @@ import (
 	"testing"
 )
 
-// modulePrefix is the import path prefix of this module.
 const modulePrefix = "github.com/andrewhigh08/iam-service/"
 
 // TestLayering keeps the service layer free of adapter imports and limits its module-internal
@@ -44,7 +43,6 @@ func TestLayering(t *testing.T) {
 	}
 }
 
-// allowedInternalImport reports whether a module-internal import path is open to the service layer.
 func allowedInternalImport(path string) bool {
 	rel := strings.TrimPrefix(path, modulePrefix)
 	return rel == "internal/domain" || rel == "internal/port" || strings.HasPrefix(rel, "internal/pkg/")

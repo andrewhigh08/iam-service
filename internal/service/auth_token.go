@@ -102,8 +102,6 @@ func (s *AuthService) sessionTTL(createdAt, now time.Time) time.Duration {
 	return ttl
 }
 
-// signAccessToken builds the RS256 access token of user for the session sid and returns it
-// with its jti.
 func (s *AuthService) signAccessToken(user *domain.User, roles []string, sid string, now time.Time) (token, jti string, err error) {
 	jti, err = randomHex(jtiBytes)
 	if err != nil {
@@ -141,20 +139,15 @@ func (s *AuthService) ValidateAccessToken(ctx context.Context, token string) (*p
 	if err != nil {
 		return nil, err
 	}
-	revoked, err := s.deps.Revocations.IsTokenRevoked(ctx, claims.ID)
+	revoked, revokedBefore, err := s.deps.Revocations.Check(ctx, claims.ID, claims.UserID)
 	if err != nil {
 		return nil, s.revocationUnavailable(ctx, err)
 	}
-	if revoked {
-		return nil, apperror.Unauthorized(msgRevoked)
-	}
-	revokedBefore, err := s.deps.Revocations.UserTokensRevokedBefore(ctx, claims.UserID)
-	if err != nil {
-		return nil, s.revocationUnavailable(ctx, err)
-	}
-	revoked, err = s.revokedByUser(ctx, claims, revokedBefore)
-	if err != nil {
-		return nil, s.revocationUnavailable(ctx, err)
+	if !revoked {
+		revoked, err = s.revokedByUser(ctx, claims, revokedBefore)
+		if err != nil {
+			return nil, s.revocationUnavailable(ctx, err)
+		}
 	}
 	if revoked {
 		return nil, apperror.Unauthorized(msgRevoked)
@@ -164,8 +157,9 @@ func (s *AuthService) ValidateAccessToken(ctx context.Context, token string) (*p
 
 // revokedByUser reports whether the user-wide revocation instant covers the token. Both the
 // instant and iat have second resolution, so a token issued within the revocation second is
-// ambiguous: it is accepted only while its session is live, because every session that
-// existed when the instant was recorded had been deleted first.
+// ambiguous: it is accepted only while its session is live. The instant is recorded before
+// the sessions are deleted, so every session that existed at the instant is gone, and a
+// session that is still live was opened after it.
 func (s *AuthService) revokedByUser(ctx context.Context, claims *port.Claims, revokedBefore time.Time) (bool, error) {
 	if revokedBefore.IsZero() {
 		return false, nil
@@ -185,7 +179,6 @@ func (s *AuthService) revokedByUser(ctx context.Context, claims *port.Claims, re
 	return !live, nil
 }
 
-// revocationUnavailable logs a revocation store failure and returns the fail-closed error.
 func (s *AuthService) revocationUnavailable(ctx context.Context, err error) error {
 	s.logger.FromContext(ctx).Error("revocation store unavailable", "error", err)
 	return apperror.ServiceUnavailable("token validation is temporarily unavailable")
@@ -222,7 +215,6 @@ type jsonWebKey struct {
 	E   string `json:"e"`
 }
 
-// jsonWebKeySet is the top-level JWKS document.
 type jsonWebKeySet struct {
 	Keys []jsonWebKey `json:"keys"`
 }
@@ -251,7 +243,6 @@ func buildJWKS(pub *rsa.PublicKey) (kid string, jwks []byte, err error) {
 	return kid, jwks, nil
 }
 
-// randomHex returns n cryptographically random bytes as a hex string.
 func randomHex(n int) (string, error) {
 	buf := make([]byte, n)
 	if _, err := rand.Read(buf); err != nil {
@@ -266,7 +257,6 @@ func hashToken(token string) string {
 	return hex.EncodeToString(digest[:])
 }
 
-// sessionID derives the sid of a session from its token hash.
 func sessionID(tokenHash string) string {
 	return tokenHash[:domain.SessionIDLength]
 }

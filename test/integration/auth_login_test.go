@@ -17,7 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// jsonWebKey is one RSA key of the JWKS document.
 type jsonWebKey struct {
 	Kty string `json:"kty"`
 	Use string `json:"use"`
@@ -73,7 +72,6 @@ func TestAdminLoginIssuesTokensVerifiableWithJWKS(t *testing.T) {
 	assert.Equal(t, accessTTL, claims.ExpiresAt.Sub(claims.IssuedAt.Time))
 }
 
-// verifyWithJWK checks the signature of token against the published RSA key and returns its claims.
 func verifyWithJWK(t *testing.T, token string, key jsonWebKey) accessClaims {
 	t.Helper()
 	n, err := base64.RawURLEncoding.DecodeString(key.N)

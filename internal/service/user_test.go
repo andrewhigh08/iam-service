@@ -17,14 +17,12 @@ import (
 	"github.com/andrewhigh08/iam-service/test/mocks"
 )
 
-// createdID is the id the repository mock assigns to a created user.
 const createdID int64 = 7
 
 // txMarker is the context key under which the fake transaction manager tags the context it
 // hands to the transactional function.
 type txMarker struct{}
 
-// inTx reports whether ctx was produced by the fixture's transaction manager.
 func inTx(ctx context.Context) bool {
 	tagged, _ := ctx.Value(txMarker{}).(bool)
 	return tagged
@@ -44,7 +42,6 @@ type userFixture struct {
 	actor       domain.Actor
 }
 
-// newUserFixture builds a UserService on fresh mocks.
 func newUserFixture(t *testing.T) *userFixture {
 	t.Helper()
 	ctrl := gomock.NewController(t)
@@ -66,7 +63,6 @@ func newUserFixture(t *testing.T) *userFixture {
 	return f
 }
 
-// deps returns the mock collaborators as UserDeps.
 func (f *userFixture) deps() UserDeps {
 	return UserDeps{
 		Users:       f.users,
@@ -79,7 +75,6 @@ func (f *userFixture) deps() UserDeps {
 	}
 }
 
-// expectTx expects one transaction and runs its function with a tagged context.
 func (f *userFixture) expectTx() {
 	f.tx.EXPECT().WithinTx(gomock.Any(), gomock.Any()).DoAndReturn(
 		func(ctx context.Context, fn func(context.Context) error) error {
@@ -87,7 +82,6 @@ func (f *userFixture) expectTx() {
 		})
 }
 
-// expectTxSetBlocked expects the blocked flag of userID to be set to blocked inside the transaction.
 func (f *userFixture) expectTxSetBlocked(userID int64, blocked bool) {
 	f.users.EXPECT().SetBlocked(gomock.Any(), userID, blocked).DoAndReturn(func(ctx context.Context, _ int64, _ bool) error {
 		assert.True(f.t, inTx(ctx), "the update must run inside the transaction")
@@ -95,7 +89,6 @@ func (f *userFixture) expectTxSetBlocked(userID int64, blocked bool) {
 	})
 }
 
-// expectTxAudit expects one audit event with action inside the transaction and returns it.
 func (f *userFixture) expectTxAudit(action string) *domain.AuditEvent {
 	recorded := &domain.AuditEvent{}
 	f.audit.EXPECT().Record(gomock.Any(), auditAction(action)).DoAndReturn(func(ctx context.Context, e domain.AuditEvent) error {

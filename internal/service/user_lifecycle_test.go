@@ -22,8 +22,8 @@ func TestUserService_Block_DisablesAccountAndRevokesAccess(t *testing.T) {
 	f.expectTxSetBlocked(user.ID, true)
 	event := f.expectTxAudit(domain.AuditActionUserBlock)
 	gomock.InOrder(
-		f.sessions.EXPECT().DeleteAllForUser(gomock.Any(), user.ID).Return(3, nil),
 		f.revocations.EXPECT().RevokeUserTokensBefore(gomock.Any(), user.ID, f.now, testAccessTTL+revocationGrace).Return(nil),
+		f.sessions.EXPECT().DeleteAllForUser(gomock.Any(), user.ID).Return(3, nil),
 	)
 
 	require.NoError(t, f.svc.Block(t.Context(), user.ID, f.actor))
@@ -42,8 +42,8 @@ func TestUserService_Block_RepeatsRevocationForABlockedUser(t *testing.T) {
 	user.IsBlocked = true
 	f.users.EXPECT().FindByID(gomock.Any(), user.ID).Return(user, nil)
 	gomock.InOrder(
-		f.sessions.EXPECT().DeleteAllForUser(gomock.Any(), user.ID).Return(1, nil),
 		f.revocations.EXPECT().RevokeUserTokensBefore(gomock.Any(), user.ID, f.now, testAccessTTL+revocationGrace).Return(nil),
+		f.sessions.EXPECT().DeleteAllForUser(gomock.Any(), user.ID).Return(1, nil),
 	)
 
 	require.NoError(t, f.svc.Block(t.Context(), user.ID, f.actor), "a block whose revocation failed can be retried")
@@ -102,6 +102,19 @@ func TestUserService_Block_Rejections(t *testing.T) {
 				f.expectTx()
 				f.users.EXPECT().SetBlocked(gomock.Any(), user.ID, true).Return(nil)
 				f.audit.EXPECT().Record(gomock.Any(), auditAction(domain.AuditActionUserBlock)).Return(nil)
+				f.revocations.EXPECT().RevokeUserTokensBefore(gomock.Any(), user.ID, f.now, testAccessTTL+revocationGrace).Return(boom)
+			},
+			code:    apperror.CodeInternal,
+			message: "failed to revoke access tokens",
+		},
+		{
+			name: "session wipe failure after the instant was recorded",
+			setup: func(f *userFixture, user *domain.User) {
+				f.users.EXPECT().FindByID(gomock.Any(), user.ID).Return(user, nil)
+				f.expectTx()
+				f.users.EXPECT().SetBlocked(gomock.Any(), user.ID, true).Return(nil)
+				f.audit.EXPECT().Record(gomock.Any(), auditAction(domain.AuditActionUserBlock)).Return(nil)
+				f.revocations.EXPECT().RevokeUserTokensBefore(gomock.Any(), user.ID, f.now, testAccessTTL+revocationGrace).Return(nil)
 				f.sessions.EXPECT().DeleteAllForUser(gomock.Any(), user.ID).Return(0, boom)
 			},
 			code:    apperror.CodeInternal,

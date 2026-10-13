@@ -18,7 +18,6 @@ import (
 // auditCtxKey tags the context of an audit test so the test can tell it was passed through.
 type auditCtxKey struct{}
 
-// newAuditService returns an AuditService on a mock repository with a frozen clock.
 func newAuditService(t *testing.T) (*AuditService, *mocks.MockAuditLogRepository, time.Time) {
 	t.Helper()
 	repo := mocks.NewMockAuditLogRepository(gomock.NewController(t))

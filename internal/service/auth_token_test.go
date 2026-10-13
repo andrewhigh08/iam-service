@@ -21,7 +21,6 @@ import (
 	"github.com/andrewhigh08/iam-service/internal/port"
 )
 
-// testSID is the session id carried by hand-crafted tokens.
 const testSID = "0123456789abcdef"
 
 // craftToken signs claims outside the service with method and key.
@@ -32,7 +31,6 @@ func craftToken(t *testing.T, method jwt.SigningMethod, key any, claims port.Cla
 	return token
 }
 
-// validClaims returns the claims of a well-formed access token issued to user at the given time.
 func validClaims(user *domain.User, at time.Time) port.Claims {
 	return port.Claims{
 		UserID:    user.ID,
@@ -55,8 +53,8 @@ func TestAuthService_ValidateAccessToken_AcceptsIssuedToken(t *testing.T) {
 	user := f.user()
 	token := f.issuedToken(user, testSID)
 	want := f.parseClaims(token)
-	f.revocations.EXPECT().IsTokenRevoked(gomock.Any(), want.ID).Return(false, nil)
-	f.revocations.EXPECT().UserTokensRevokedBefore(gomock.Any(), user.ID).Return(time.Time{}, nil)
+	// One store call answers both the blacklist and the revocation instant.
+	f.revocations.EXPECT().Check(gomock.Any(), want.ID, user.ID).Return(false, time.Time{}, nil)
 
 	got, err := f.svc.ValidateAccessToken(t.Context(), token)
 
@@ -82,8 +80,7 @@ func TestAuthService_ValidateAccessToken_ToleratesClockSkew(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			claims := validClaims(user, tc.at)
-			f.revocations.EXPECT().IsTokenRevoked(gomock.Any(), claims.ID).Return(false, nil)
-			f.revocations.EXPECT().UserTokensRevokedBefore(gomock.Any(), user.ID).Return(time.Time{}, nil)
+			f.revocations.EXPECT().Check(gomock.Any(), claims.ID, user.ID).Return(false, time.Time{}, nil)
 
 			got, err := f.svc.ValidateAccessToken(t.Context(), craftToken(t, jwt.SigningMethodRS256, priv, claims))
 
@@ -149,31 +146,35 @@ func TestAuthService_ValidateAccessToken_AppliesRevocationRules(t *testing.T) {
 		{
 			name: "blacklisted jti",
 			setup: func(f *authFixture, claims *port.Claims) {
-				f.revocations.EXPECT().IsTokenRevoked(gomock.Any(), claims.ID).Return(true, nil)
+				f.revocations.EXPECT().Check(gomock.Any(), claims.ID, claims.UserID).Return(true, time.Time{}, nil)
+			},
+			revoked: true,
+		},
+		{
+			name: "blacklisted jti is rejected without consulting the sessions",
+			setup: func(f *authFixture, claims *port.Claims) {
+				f.revocations.EXPECT().Check(gomock.Any(), claims.ID, claims.UserID).Return(true, claims.IssuedAt.Time, nil)
 			},
 			revoked: true,
 		},
 		{
 			name: "issued before the revocation instant",
 			setup: func(f *authFixture, claims *port.Claims) {
-				f.revocations.EXPECT().IsTokenRevoked(gomock.Any(), claims.ID).Return(false, nil)
-				f.revocations.EXPECT().UserTokensRevokedBefore(gomock.Any(), claims.UserID).Return(claims.IssuedAt.Add(time.Second), nil)
+				f.revocations.EXPECT().Check(gomock.Any(), claims.ID, claims.UserID).Return(false, claims.IssuedAt.Add(time.Second), nil)
 			},
 			revoked: true,
 		},
 		{
 			name: "issued after the revocation instant",
 			setup: func(f *authFixture, claims *port.Claims) {
-				f.revocations.EXPECT().IsTokenRevoked(gomock.Any(), claims.ID).Return(false, nil)
-				f.revocations.EXPECT().UserTokensRevokedBefore(gomock.Any(), claims.UserID).Return(claims.IssuedAt.Add(-time.Second), nil)
+				f.revocations.EXPECT().Check(gomock.Any(), claims.ID, claims.UserID).Return(false, claims.IssuedAt.Add(-time.Second), nil)
 			},
 			revoked: false,
 		},
 		{
 			name: "issued within the revocation second while its session is live",
 			setup: func(f *authFixture, claims *port.Claims) {
-				f.revocations.EXPECT().IsTokenRevoked(gomock.Any(), claims.ID).Return(false, nil)
-				f.revocations.EXPECT().UserTokensRevokedBefore(gomock.Any(), claims.UserID).Return(claims.IssuedAt.Time, nil)
+				f.revocations.EXPECT().Check(gomock.Any(), claims.ID, claims.UserID).Return(false, claims.IssuedAt.Time, nil)
 				f.sessions.EXPECT().ListForUser(gomock.Any(), claims.UserID).Return([]domain.Session{{ID: "other"}, {ID: testSID}}, nil)
 			},
 			revoked: false,
@@ -181,8 +182,7 @@ func TestAuthService_ValidateAccessToken_AppliesRevocationRules(t *testing.T) {
 		{
 			name: "issued within the revocation second after its session ended",
 			setup: func(f *authFixture, claims *port.Claims) {
-				f.revocations.EXPECT().IsTokenRevoked(gomock.Any(), claims.ID).Return(false, nil)
-				f.revocations.EXPECT().UserTokensRevokedBefore(gomock.Any(), claims.UserID).Return(claims.IssuedAt.Time, nil)
+				f.revocations.EXPECT().Check(gomock.Any(), claims.ID, claims.UserID).Return(false, claims.IssuedAt.Time, nil)
 				f.sessions.EXPECT().ListForUser(gomock.Any(), claims.UserID).Return([]domain.Session{{ID: "other"}}, nil)
 			},
 			revoked: true,
@@ -218,23 +218,15 @@ func TestAuthService_ValidateAccessToken_FailsClosedWhenStoresAreDown(t *testing
 		setup func(f *authFixture, claims *port.Claims)
 	}{
 		{
-			name: "blacklist lookup",
+			name: "revocation check",
 			setup: func(f *authFixture, claims *port.Claims) {
-				f.revocations.EXPECT().IsTokenRevoked(gomock.Any(), claims.ID).Return(false, boom)
-			},
-		},
-		{
-			name: "revocation instant lookup",
-			setup: func(f *authFixture, claims *port.Claims) {
-				f.revocations.EXPECT().IsTokenRevoked(gomock.Any(), claims.ID).Return(false, nil)
-				f.revocations.EXPECT().UserTokensRevokedBefore(gomock.Any(), claims.UserID).Return(time.Time{}, boom)
+				f.revocations.EXPECT().Check(gomock.Any(), claims.ID, claims.UserID).Return(false, time.Time{}, boom)
 			},
 		},
 		{
 			name: "session lookup within the revocation second",
 			setup: func(f *authFixture, claims *port.Claims) {
-				f.revocations.EXPECT().IsTokenRevoked(gomock.Any(), claims.ID).Return(false, nil)
-				f.revocations.EXPECT().UserTokensRevokedBefore(gomock.Any(), claims.UserID).Return(claims.IssuedAt.Time, nil)
+				f.revocations.EXPECT().Check(gomock.Any(), claims.ID, claims.UserID).Return(false, claims.IssuedAt.Time, nil)
 				f.sessions.EXPECT().ListForUser(gomock.Any(), claims.UserID).Return(nil, boom)
 			},
 		},

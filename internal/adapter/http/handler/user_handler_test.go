@@ -17,7 +17,6 @@ import (
 	"github.com/andrewhigh08/iam-service/internal/port"
 )
 
-// usersRouter mounts the user administration endpoints of f behind the test authentication.
 func usersRouter(f *userFixture) *gin.Engine {
 	r := gin.New()
 	users := r.Group("/api/v1/users", authenticated)
@@ -44,7 +43,6 @@ func sampleUser(id int64, email string, blocked bool) *domain.User {
 	}
 }
 
-// listUsers sends GET /api/v1/users with the given raw query string.
 func listUsers(t *testing.T, f *userFixture, query string) *httptest.ResponseRecorder {
 	t.Helper()
 	target := "/api/v1/users"
@@ -214,11 +212,12 @@ func TestCreateUser_CreatesTheUser(t *testing.T) {
 func TestCreateUser_RejectsInvalidBodies(t *testing.T) {
 	t.Parallel()
 	valid := CreateUserRequest{Email: "new@example.com", Password: "Str0ng-Pass!", FullName: "New User", Role: domain.RoleAnalyst}
-	withoutEmail, withoutRole, badRole, badEmail := valid, valid, valid, valid
+	withoutEmail, withoutRole, badRole, badEmail, longEmail := valid, valid, valid, valid, valid
 	withoutEmail.Email = ""
 	withoutRole.Role = ""
 	badRole.Role = "superuser"
 	badEmail.Email = "not-an-email"
+	longEmail.Email = overlongEmail
 
 	tests := []struct {
 		name       string
@@ -233,6 +232,7 @@ func TestCreateUser_RejectsInvalidBodies(t *testing.T) {
 		{name: "missing role", body: withoutRole, wantFields: map[string]any{"role": "required"}},
 		{name: "unknown role", body: badRole, wantFields: map[string]any{"role": "oneof=admin analyst viewer"}},
 		{name: "malformed email", body: badEmail, wantFields: map[string]any{"email": "email"}},
+		{name: "overlong email", body: longEmail, wantFields: map[string]any{"email": "max=254"}},
 		{name: "wrong field type", body: `{"email":"new@example.com","password":"x","full_name":"n","role":"viewer","password_temporary":"yes"}`, wantFields: map[string]any{"password_temporary": "invalid type"}},
 		{name: "not json", body: "<xml/>", wantReason: "body must be a JSON object"},
 	}

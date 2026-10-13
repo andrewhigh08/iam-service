@@ -15,7 +15,6 @@ import (
 	"github.com/andrewhigh08/iam-service/internal/pkg/apperror"
 )
 
-// sessionsRouter mounts the session endpoints of f behind the test authentication.
 func sessionsRouter(f *authFixture) *gin.Engine {
 	r := gin.New()
 	api := r.Group("/api/v1", authenticated)

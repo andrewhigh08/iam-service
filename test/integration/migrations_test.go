@@ -48,8 +48,6 @@ func TestMigrationsRollBackAndReapplyCleanly(t *testing.T) {
 	assert.False(t, dirty)
 }
 
-// newMigrator builds a golang-migrate instance over the embedded migrations on a dedicated
-// connection of db that is released when the test ends.
 func newMigrator(t *testing.T, db *sql.DB) *migrate.Migrate {
 	t.Helper()
 	conn, err := db.Conn(t.Context())
@@ -64,7 +62,6 @@ func newMigrator(t *testing.T, db *sql.DB) *migrate.Migrate {
 	return m
 }
 
-// assertSchema checks that the tables and indexes of the schema all exist, or that none does.
 func assertSchema(t *testing.T, db *sql.DB, present bool) {
 	t.Helper()
 	var tables, indexes int

@@ -6,15 +6,12 @@ import (
 	"slices"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
-
 	"github.com/andrewhigh08/iam-service/internal/domain"
 	"github.com/andrewhigh08/iam-service/internal/pkg/apperror"
 	"github.com/andrewhigh08/iam-service/internal/pkg/logger"
 	"github.com/andrewhigh08/iam-service/internal/port"
 )
 
-// adminFullName is the display name of the seeded administrator.
 const adminFullName = "Administrator"
 
 // PolicyAuthorizer is the authorization service as the Seeder needs it: role assignment plus
@@ -24,11 +21,28 @@ type PolicyAuthorizer interface {
 	EnsurePolicies(ctx context.Context, policies []domain.Policy) error
 }
 
-// Seeder installs the default policies and the initial administrator. Logger may be nil.
+// Seeder installs the default policies and the initial administrator. NewSeeder checks the
+// collaborators up front; a Seeder built as a literal is checked by Seed. Logger may be nil.
 type Seeder struct {
 	Users  port.UserRepository
 	Authz  PolicyAuthorizer
 	Logger *logger.Logger
+}
+
+// NewSeeder returns a Seeder on users and authz, rejecting missing collaborators.
+func NewSeeder(users port.UserRepository, authz PolicyAuthorizer, log *logger.Logger) (*Seeder, error) {
+	s := &Seeder{Users: users, Authz: authz, Logger: log}
+	if err := s.validate(); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+func (s *Seeder) validate() error {
+	if s.Users == nil || s.Authz == nil {
+		return errors.New("seeder: user repository and authorization service are required")
+	}
+	return nil
 }
 
 // Seed ensures the default policies exist, creates the administrator when adminEmail is set
@@ -36,8 +50,8 @@ type Seeder struct {
 // lacks it. It is idempotent; the caller provides the transaction and the advisory lock that
 // serialize concurrent replicas.
 func (s *Seeder) Seed(ctx context.Context, adminEmail, adminPassword string) error {
-	if s.Users == nil || s.Authz == nil {
-		return errors.New("seeder: user repository and authorization service are required")
+	if err := s.validate(); err != nil {
+		return err
 	}
 	log := componentLogger(s.Logger, "seeder").FromContext(ctx)
 	if err := s.Authz.EnsurePolicies(ctx, domain.DefaultPolicies()); err != nil {
@@ -64,14 +78,14 @@ func (s *Seeder) Seed(ctx context.Context, adminEmail, adminPassword string) err
 // createAdmin inserts the administrator and grants the admin role. The caller's transaction
 // is rolled back on failure, so no half-created account survives.
 func (s *Seeder) createAdmin(ctx context.Context, email, password string, log *logger.Logger) error {
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := hashPassword(password)
 	if err != nil {
-		return apperror.Internal(msgHashingFailed, err)
+		return err
 	}
 	now := time.Now()
 	admin := &domain.User{
 		Email:             email,
-		PasswordHash:      string(hash),
+		PasswordHash:      hash,
 		PasswordTemporary: false,
 		PasswordChangedAt: now,
 		FullName:          adminFullName,
