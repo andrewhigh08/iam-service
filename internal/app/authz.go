@@ -4,10 +4,10 @@ import (
 	"fmt"
 
 	"github.com/casbin/casbin/v3"
-	gormadapter "github.com/casbin/gorm-adapter/v3"
 	rediswatcher "github.com/casbin/redis-watcher/v2"
 	"github.com/redis/go-redis/v9"
-	"gorm.io/gorm"
+
+	"github.com/andrewhigh08/iam-service/internal/adapter/casbinpg"
 )
 
 // policyChannel is the Redis channel on which replicas announce policy changes.
@@ -16,16 +16,10 @@ const policyChannel = "/casbin"
 // newEnforcer builds the casbin enforcer on the application database, loads its policies and,
 // when AUTHZ_WATCHER_ENABLED is set, subscribes it to policy changes made by other replicas.
 // A synced enforcer is used because role assignments and watcher updates run concurrently
-// with the access checks of in-flight requests. The adapter's own schema migration is turned
-// off: the casbin_rule table belongs to the embedded migrations alone.
+// with the access checks of in-flight requests. Policies live in the casbin_rule table that
+// the embedded migrations own; the adapter never touches the schema.
 func (a *App) newEnforcer() (casbin.IEnforcer, error) {
-	adapterDB := a.db.Session(&gorm.Session{})
-	gormadapter.TurnOffAutoMigrate(adapterDB)
-	adapter, err := gormadapter.NewAdapterByDB(adapterDB)
-	if err != nil {
-		return nil, fmt.Errorf("create policy adapter: %w", err)
-	}
-	enforcer, err := casbin.NewSyncedEnforcer(a.cfg.Casbin.ModelPath, adapter)
+	enforcer, err := casbin.NewSyncedEnforcer(a.cfg.Casbin.ModelPath, casbinpg.New(a.db))
 	if err != nil {
 		return nil, fmt.Errorf("create enforcer: %w", err)
 	}
