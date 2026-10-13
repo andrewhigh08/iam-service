@@ -15,6 +15,7 @@ concurrency:
 
 env:
   GOLANGCI_LINT_VERSION: v2.14.0
+  GOVULNCHECK_VERSION: v1.9.0
   IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
@@ -91,11 +92,14 @@ jobs:
           go-version-file: go.mod
 
       - name: gosec
+        # Fails the job, and so the publish, on high-severity, high-confidence findings.
         uses: securego/gosec@v2.29.0
         with:
-          args: -no-fail -fmt sarif -out gosec.sarif ./...
+          args: -severity high -confidence high -fmt sarif -out gosec.sarif ./...
 
       - name: Upload gosec results
+        # Runs after a failed scan too, so the Security tab shows what blocked the job.
+        if: always()
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: gosec.sarif
@@ -107,7 +111,7 @@ jobs:
         # The step log and the Security tab show what needs a dependency bump.
         continue-on-error: true
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
           govulncheck ./...
 
   build:
@@ -141,14 +145,22 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@0.36.0
+        # Fails the job, and so the publish, on CRITICAL or HIGH findings that have a fix.
+        # Without limit-severities-for-sarif the action drops the severity filter for SARIF
+        # output, and the exit code would then count findings of every severity.
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: iam-service:ci
           format: sarif
           output: trivy.sarif
           severity: CRITICAL,HIGH
+          limit-severities-for-sarif: true
+          ignore-unfixed: true
+          exit-code: "1"
 
       - name: Upload Trivy results
+        # Runs after a failed scan too, so the Security tab shows what blocked the job.
+        if: always()
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy.sarif
