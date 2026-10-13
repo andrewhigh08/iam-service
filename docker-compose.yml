@@ -1,25 +1,30 @@
 services:
-  # Application
   iam-service:
     build:
       context: .
-      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
     container_name: iam_service
+    restart: unless-stopped
     environment:
-      - PORT=8080
-      - LOG_LEVEL=info
-      - LOG_FORMAT=json
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=iam_user
-      - DB_PASSWORD=iam_password
-      - DB_NAME=iam_db
-      - DB_SSLMODE=disable
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - CASBIN_MODEL_PATH=/app/configs/casbin_model.conf
-      - OTEL_ENABLED=true
-      - OTEL_ENDPOINT=jaeger:4317
+      SERVER_PORT: "8080"
+      LOG_LEVEL: info
+      LOG_FORMAT: json
+      DEV_MODE: "true"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: iam_user
+      DB_PASSWORD: iam_password
+      DB_NAME: iam_db
+      DB_SSLMODE: disable
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      CASBIN_MODEL_PATH: /app/configs/casbin_model.conf
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: Admin123!
+      OTEL_ENABLED: "true"
+      OTEL_ENDPOINT: jaeger:4317
+      OTEL_ENVIRONMENT: local
     ports:
       - "8080:8080"
     depends_on:
@@ -28,17 +33,14 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health/live"]
-      interval: 30s
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health/ready"]
+      interval: 15s
       timeout: 5s
-      start_period: 10s
-      retries: 3
-    networks:
-      - iam-network
+      start_period: 15s
+      retries: 5
 
-  # Database
   postgres:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     container_name: iam_postgres
     environment:
       POSTGRES_DB: iam_db
@@ -48,89 +50,61 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./migrations/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U iam_user -d iam_db"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
-      retries: 5
-    networks:
-      - iam-network
+      retries: 10
 
-  # Cache
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     container_name: iam_redis
+    command: redis-server --maxmemory 256mb --maxmemory-policy noeviction
     ports:
       - "6379:6379"
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
+      interval: 5s
       timeout: 3s
-      retries: 5
-    networks:
-      - iam-network
+      retries: 10
 
-  # Observability - Prometheus
   prometheus:
-    image: prom/prometheus:v2.48.0
+    image: prom/prometheus:v3.7.0
     container_name: iam_prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
     ports:
       - "9090:9090"
     volumes:
       - ./configs/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--web.enable-lifecycle'
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    networks:
-      - iam-network
 
-  # Observability - Grafana
   grafana:
-    image: grafana/grafana:10.2.2
+    image: grafana/grafana:12.2.0
     container_name: iam_grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
     ports:
       - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
-      - grafana_data:/var/lib/grafana
       - ./configs/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
     depends_on:
       - prometheus
-    networks:
-      - iam-network
 
-  # Observability - Jaeger (Tracing)
   jaeger:
-    image: jaegertracing/all-in-one:1.52
+    image: jaegertracing/jaeger:2.11.0
     container_name: iam_jaeger
     ports:
-      - "16686:16686"  # Jaeger UI
-      - "4317:4317"    # OTLP gRPC
-      - "4318:4318"    # OTLP HTTP
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
-    networks:
-      - iam-network
-
-networks:
-  iam-network:
-    driver: bridge
+      - "16686:16686" # UI
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
 
 volumes:
   postgres_data:
